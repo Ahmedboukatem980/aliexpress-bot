@@ -74,12 +74,19 @@ async function isUserSubscribed(userId) {
   }
 }
 
-// Return to original buttons layout
+// Updated main keyboard to match the layout in the screenshot using existing buttons
 const mainKeyboard = (ctx) => {
-  let buttons = [['🏠 القائمة الرئيسية']];
+  let buttons = [];
+  
+  // Custom buttons for all users (Placeholder text based on original buttons)
+  buttons.push(['🏠 القائمة الرئيسية', '📢 نشر عرض']);
+  
+  // Admin specific buttons
   if (ctx.from.id === ADMIN_ID) {
-    buttons.push(['🛠️ لوحة التحكم']);
+    buttons.push(['📊 الإحصائيات', '📢 إرسال رسالة']);
+    buttons.push(['👥 قائمة المشتركين', '🛠️ لوحة التحكم']);
   }
+  
   return Markup.keyboard(buttons).resize();
 };
 
@@ -96,7 +103,7 @@ bot.use(async (ctx, next) => {
 });
 
 bot.command(['start', 'help'], async (ctx) => {
-  const welcomeMessage = `مرحبا بك معنا، كل ما عليك الان هو إرسال لنا رابط المنتج التي تريد شرائه وسنقوم بتوفير لك أعلى نسبة خصم العملات 👌 أيضا عروض اخرى للمنتج بأسعار منتزة،`;
+  const welcomeMessage = `مرحبا بك معنا، كل ما عليك الان هو إرسال لنا رابط المنتج التي تريد شرائه وسنقوم بتوفير لك أعلى نسبة خصم العملات 👌 أيضا عروض اخرى للمنتج بأسعار ممتازة،`;
 
   let inlineKeyboard = [];
   if (Channel && Channel.startsWith('https://')) {
@@ -118,6 +125,42 @@ bot.command(['start', 'help'], async (ctx) => {
 
 bot.hears('🏠 القائمة الرئيسية', async (ctx) => {
   await ctx.reply('مرحباً بك في القائمة الرئيسية!', mainKeyboard(ctx));
+});
+
+bot.hears('📢 نشر عرض', (ctx) => ctx.reply('ميزة نشر العرض قيد التطوير.'));
+
+bot.hears('📊 الإحصائيات', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
+  try {
+    const total = await pool.query('SELECT COUNT(*) FROM users');
+    const today = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '1 day'");
+    const week = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '7 days'");
+    const month = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '30 days'");
+    const statsText = `📊 إحصائيات البوت:\n👥 إجمالي المشتركين: ${total.rows[0].count}\n📅 مشتركين اليوم: ${today.rows[0].count}\n🗓️ مشتركين الأسبوع: ${week.rows[0].count}\n🌙 مشتركين الشهر: ${month.rows[0].count}`;
+    await ctx.reply(statsText);
+  } catch (e) { ctx.reply('حدث خطأ في جلب الإحصائيات'); }
+});
+
+bot.hears('📢 إرسال رسالة', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  broadcastState[ctx.from.id] = 'awaiting_message';
+  await ctx.reply('📝 أرسل الرسالة التي تريد تعميمها على جميع المشتركين:', {
+    reply_markup: { inline_keyboard: [[{ text: '❌ إلغاء', callback_data: 'admin_panel' }]] }
+  });
+});
+
+bot.hears('👥 قائمة المشتركين', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
+  try {
+    const users = await pool.query('SELECT user_id, username FROM users ORDER BY joined_at DESC LIMIT 50');
+    let list = '👥 قائمة بآخر 50 مشترك:\n\n';
+    users.rows.forEach(u => {
+      list += `- ${u.username ? '@' + u.username : u.user_id}\n`;
+    });
+    await ctx.reply(list);
+  } catch (e) { ctx.reply('حدث خطأ في جلب القائمة'); }
 });
 
 bot.hears('🛠️ لوحة التحكم', async (ctx) => {
