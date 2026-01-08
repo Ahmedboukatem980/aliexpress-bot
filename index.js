@@ -1,4 +1,4 @@
-const { Telegraf, Markup } = require('telegraf');
+const { Telegraf } = require('telegraf');
 const express = require('express');
 const app = express();
 const { portaffFunction } = require('./afflink');
@@ -9,23 +9,44 @@ const cookies = process.env.cook;
 const Channel = process.env.Channel || '';
 const ADMIN_ID = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+let pool = null;
+let dbConnected = false;
+
+if (process.env.DATABASE_URL) {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL.includes('render.com') ? { rejectUnauthorized: false } : false
+  });
+  
+  pool.query('SELECT 1')
+    .then(() => {
+      dbConnected = true;
+      console.log('Database connected');
+      initDB();
+    })
+    .catch(err => {
+      console.log('Database connection failed, running without DB:', err.message);
+      dbConnected = false;
+    });
+}
 
 async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      user_id BIGINT PRIMARY KEY,
-      username TEXT,
-      joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        username TEXT,
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch (e) {
+    console.log('DB init error:', e.message);
+  }
 }
-initDB().catch(console.error);
 
 app.use(express.json());
+app.use(bot.webhookCallback('/bot'));
 
 app.get('/', (req, res) => res.send('Bot is running!'));
 
@@ -36,29 +57,31 @@ async function safeSend(ctx, fn) {
     if (err.code === 403) {
       console.log(`User ${ctx.chat?.id} blocked the bot`);
       return null;
-    } else {
-      console.error(err);
-      throw err;
     }
+    console.error(err);
+    return null;
   }
 }
 
 async function isUserSubscribed(userId) {
   try {
+    if (!Channel) return true;
     const idChannel = Channel.replace('https://t.me/', '@');
     const member = await bot.telegram.getChatMember(idChannel, userId);
     return ['member', 'administrator', 'creator'].includes(member.status);
   } catch (e) {
-    return false;
+    return true;
   }
 }
 
 bot.use(async (ctx, next) => {
-  if (ctx.from) {
-    await pool.query(
-      'INSERT INTO users (user_id, username) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING',
-      [ctx.from.id, ctx.from.username]
-    );
+  if (ctx.from && pool && dbConnected) {
+    try {
+      await pool.query(
+        'INSERT INTO users (user_id, username) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING',
+        [ctx.from.id, ctx.from.username]
+      );
+    } catch (e) {}
   }
   return next();
 });
@@ -83,7 +106,8 @@ bot.command(['start', 'help'], async (ctx) => {
 });
 
 bot.action('admin_panel', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
   await ctx.editMessageText('🛠️ لوحة التحكم الخاصة بالمسؤول:', {
     reply_markup: {
       inline_keyboard: [
@@ -96,28 +120,42 @@ bot.action('admin_panel', async (ctx) => {
 });
 
 bot.action('stats', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
-  const total = await pool.query('SELECT COUNT(*) FROM users');
-  const today = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '1 day'");
-  const week = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '7 days'");
-  const month = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '30 days'");
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
+  
+  if (!pool || !dbConnected) {
+    return ctx.editMessageText('قاعدة البيانات غير متصلة', {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 عودة', callback_data: 'admin_panel' }]] }
+    });
+  }
 
-  const statsText = `
-📊 إحصائيات البوت:
+  try {
+    const total = await pool.query('SELECT COUNT(*) FROM users');
+    const today = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '1 day'");
+    const week = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '7 days'");
+    const month = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '30 days'");
+
+    const statsText = `📊 إحصائيات البوت:
 👥 إجمالي المشتركين: ${total.rows[0].count}
 📅 مشتركين اليوم: ${today.rows[0].count}
 🗓️ مشتركين الأسبوع: ${week.rows[0].count}
-🌙 مشتركين الشهر: ${month.rows[0].count}
-`;
-  await ctx.editMessageText(statsText, {
-    reply_markup: { inline_keyboard: [[{ text: '🔙 عودة', callback_data: 'admin_panel' }]] }
-  });
+🌙 مشتركين الشهر: ${month.rows[0].count}`;
+
+    await ctx.editMessageText(statsText, {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 عودة', callback_data: 'admin_panel' }]] }
+    });
+  } catch (e) {
+    await ctx.editMessageText('حدث خطأ في جلب الإحصائيات', {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 عودة', callback_data: 'admin_panel' }]] }
+    });
+  }
 });
 
 let broadcastState = {};
 
 bot.action('broadcast', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
   broadcastState[ctx.from.id] = 'awaiting_message';
   await ctx.editMessageText('📝 أرسل الرسالة التي تريد تعميمها على جميع المشتركين:', {
     reply_markup: { inline_keyboard: [[{ text: '❌ إلغاء', callback_data: 'admin_panel' }]] }
@@ -125,15 +163,29 @@ bot.action('broadcast', async (ctx) => {
 });
 
 bot.action('user_list', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
-  const users = await pool.query('SELECT user_id, username FROM users LIMIT 50');
-  let list = '👥 قائمة بآخر 50 مشترك:\n\n';
-  users.rows.forEach(u => {
-    list += `- ${u.username ? '@' + u.username : u.user_id}\n`;
-  });
-  await ctx.editMessageText(list, {
-    reply_markup: { inline_keyboard: [[{ text: '🔙 عودة', callback_data: 'admin_panel' }]] }
-  });
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
+  
+  if (!pool || !dbConnected) {
+    return ctx.editMessageText('قاعدة البيانات غير متصلة', {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 عودة', callback_data: 'admin_panel' }]] }
+    });
+  }
+
+  try {
+    const users = await pool.query('SELECT user_id, username FROM users ORDER BY joined_at DESC LIMIT 50');
+    let list = '👥 قائمة بآخر 50 مشترك:\n\n';
+    users.rows.forEach(u => {
+      list += `- ${u.username ? '@' + u.username : u.user_id}\n`;
+    });
+    await ctx.editMessageText(list, {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 عودة', callback_data: 'admin_panel' }]] }
+    });
+  } catch (e) {
+    await ctx.editMessageText('حدث خطأ في جلب القائمة', {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 عودة', callback_data: 'admin_panel' }]] }
+    });
+  }
 });
 
 bot.on('text', async (ctx) => {
@@ -142,16 +194,25 @@ bot.on('text', async (ctx) => {
 
   if (broadcastState[userId] === 'awaiting_message') {
     delete broadcastState[userId];
-    const users = await pool.query('SELECT user_id FROM users');
-    let count = 0;
-    ctx.reply(`⏳ بدأ الإرسال إلى ${users.rows.length} مستخدم...`);
-    for (const row of users.rows) {
-      try {
-        await bot.telegram.sendMessage(row.id, text);
-        count++;
-      } catch (e) {}
+    
+    if (!pool || !dbConnected) {
+      return ctx.reply('قاعدة البيانات غير متصلة');
     }
-    return ctx.reply(`✅ تم الإرسال بنجاح إلى ${count} مستخدم.`);
+
+    try {
+      const users = await pool.query('SELECT user_id FROM users');
+      let count = 0;
+      await ctx.reply(`⏳ بدأ الإرسال إلى ${users.rows.length} مستخدم...`);
+      for (const row of users.rows) {
+        try {
+          await bot.telegram.sendMessage(row.user_id, text);
+          count++;
+        } catch (e) {}
+      }
+      return ctx.reply(`✅ تم الإرسال بنجاح إلى ${count} مستخدم.`);
+    } catch (e) {
+      return ctx.reply('حدث خطأ أثناء الإرسال');
+    }
   }
 
   const subscribed = await isUserSubscribed(userId);
@@ -169,9 +230,6 @@ bot.on('text', async (ctx) => {
   }
 
   if (!text.includes('aliexpress.com')) {
-    if (userId !== ADMIN_ID) {
-      await safeSend(ctx, () => ctx.reply('🚫 الرجاء إرسال رابط من AliExpress فقط.'));
-    }
     return;
   }
 
@@ -187,10 +245,16 @@ bot.on('text', async (ctx) => {
         caption: `${coinPi.previews.title}\n\n<b>🎉 روابط التخفيض</b>\n\n🔹 تخفيض العملات:\n${coinPi.aff.coin}\n\n🔹 العملات:\n${coinPi.aff.point}\n\n🔹 السوبر ديلز:\n${coinPi.aff.super}\n\n🔹 العرض المحدود:\n${coinPi.aff.limit}\n\n🔹 Bundle deals:\n${coinPi.aff.ther3}\n\n⚠️ غيّر البلد إلى كندا 🇨🇦`,
         parse_mode: 'HTML',
       }
-    ).then(() => ctx.deleteMessage(sent.message_id));
+    ).then(() => {
+      if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
+    });
   } catch (e) {
     ctx.reply('❗ حدث خطأ أثناء معالجة الرابط');
   }
+});
+
+bot.catch((err, ctx) => {
+  console.error('Bot error:', err.message);
 });
 
 const PORT = process.env.PORT || 5000;
@@ -201,9 +265,6 @@ function getWebhookUrl() {
   }
   if (process.env.REPLIT_DEV_DOMAIN) {
     return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  }
-  if (process.env.WEBHOOK_URL) {
-    return process.env.WEBHOOK_URL;
   }
   return null;
 }
@@ -219,17 +280,11 @@ app.listen(PORT, '0.0.0.0', () => {
   }
   
   if (WEBHOOK_URL) {
-    const webhookPath = `/bot-${process.env.token.split(':')[0]}`;
-    app.use(webhookPath, bot.webhookCallback(webhookPath));
-    
-    bot.telegram.setWebhook(`${WEBHOOK_URL}${webhookPath}`)
-      .then(() => {
-        console.log(`✅ Webhook set: ${WEBHOOK_URL}${webhookPath}`);
-      })
+    bot.telegram.setWebhook(`${WEBHOOK_URL}/bot`)
+      .then(() => console.log(`Webhook set: ${WEBHOOK_URL}/bot`))
       .catch(err => console.error('Webhook failed:', err.message));
   } else {
-    bot.launch()
-      .then(() => console.log('✅ Bot launched in polling mode'))
-      .catch(err => console.error('Bot launch failed:', err.message));
+    console.log('No webhook URL, starting polling...');
+    bot.launch().then(() => console.log('Bot started with polling'));
   }
 });
