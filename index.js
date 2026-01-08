@@ -26,9 +26,8 @@ async function initDB() {
 initDB().catch(console.error);
 
 app.use(express.json());
-app.use(bot.webhookCallback('/bot'));
 
-app.get('/', (req, res) => res.sendStatus(200));
+app.get('/', (req, res) => res.send('Bot is running!'));
 
 async function safeSend(ctx, fn) {
   try {
@@ -148,7 +147,7 @@ bot.on('text', async (ctx) => {
     ctx.reply(`⏳ بدأ الإرسال إلى ${users.rows.length} مستخدم...`);
     for (const row of users.rows) {
       try {
-        await bot.telegram.sendMessage(row.user_id, text);
+        await bot.telegram.sendMessage(row.id, text);
         count++;
       } catch (e) {}
     }
@@ -220,10 +219,17 @@ app.listen(PORT, '0.0.0.0', () => {
   }
   
   if (WEBHOOK_URL) {
-    bot.telegram.setWebhook(`${WEBHOOK_URL}/bot`)
-      .then(() => console.log(`Webhook set: ${WEBHOOK_URL}/bot`))
+    const webhookPath = `/bot-${process.env.token.split(':')[0]}`;
+    app.use(webhookPath, bot.webhookCallback(webhookPath));
+    
+    bot.telegram.setWebhook(`${WEBHOOK_URL}${webhookPath}`)
+      .then(() => {
+        console.log(`✅ Webhook set: ${WEBHOOK_URL}${webhookPath}`);
+      })
       .catch(err => console.error('Webhook failed:', err.message));
   } else {
-    console.log('No webhook URL configured');
+    bot.launch()
+      .then(() => console.log('✅ Bot launched in polling mode'))
+      .catch(err => console.error('Bot launch failed:', err.message));
   }
 });
