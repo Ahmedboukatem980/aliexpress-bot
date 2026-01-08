@@ -1,4 +1,4 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const express = require('express');
 const app = express();
 const { portaffFunction } = require('./afflink');
@@ -15,7 +15,7 @@ let dbConnected = false;
 if (process.env.DATABASE_URL) {
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL.includes('render.com') ? { rejectUnauthorized: false } : false
+    ssl: process.env.DATABASE_URL.includes('render.com') || process.env.DATABASE_URL.includes('neon.tech') ? { rejectUnauthorized: false } : false
   });
   
   pool.query('SELECT 1')
@@ -74,6 +74,15 @@ async function isUserSubscribed(userId) {
   }
 }
 
+// Main Keyboard (Reply Keyboard)
+const mainKeyboard = (ctx) => {
+  let buttons = [['🏠 القائمة الرئيسية']];
+  if (ctx.from.id === ADMIN_ID) {
+    buttons.push(['🛠️ لوحة التحكم']);
+  }
+  return Markup.keyboard(buttons).resize();
+};
+
 bot.use(async (ctx, next) => {
   if (ctx.from && pool && dbConnected) {
     try {
@@ -89,20 +98,37 @@ bot.use(async (ctx, next) => {
 bot.command(['start', 'help'], async (ctx) => {
   const welcomeMessage = `مرحبا بك معنا، كل ما عليك الان هو إرسال لنا رابط المنتج التي تريد شرائه وسنقوم بتوفير لك أعلى نسبة خصم العملات 👌 أيضا عروض اخرى للمنتج بأسعار ممتازة،`;
 
-  let keyboard = [];
+  let inlineKeyboard = [];
   if (Channel && Channel.startsWith('https://')) {
-    keyboard.push([{ text: 'اشترك في القناة 📢', url: Channel }]);
-  }
-
-  if (ctx.from.id === ADMIN_ID) {
-    keyboard.push([{ text: 'لوحة التحكم 🛠️', callback_data: 'admin_panel' }]);
+    inlineKeyboard.push([{ text: 'اشترك في القناة 📢', url: Channel }]);
   }
 
   await safeSend(ctx, () =>
     ctx.reply(welcomeMessage, {
-      reply_markup: { inline_keyboard: keyboard }
+      ...mainKeyboard(ctx),
+      reply_markup: { 
+        inline_keyboard: inlineKeyboard,
+        ...mainKeyboard(ctx).reply_markup
+      }
     })
   );
+});
+
+bot.hears('🏠 القائمة الرئيسية', async (ctx) => {
+  await ctx.reply('مرحباً بك في القائمة الرئيسية!', mainKeyboard(ctx));
+});
+
+bot.hears('🛠️ لوحة التحكم', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  await ctx.reply('🛠️ لوحة التحكم الخاصة بالمسؤول:', {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📊 الإحصائيات', callback_data: 'stats' }],
+        [{ text: '📢 إرسال رسالة للمشتركين', callback_data: 'broadcast' }],
+        [{ text: '👥 قائمة المشتركين', callback_data: 'user_list' }]
+      ]
+    }
+  });
 });
 
 bot.action('admin_panel', async (ctx) => {
@@ -281,7 +307,7 @@ app.listen(PORT, '0.0.0.0', () => {
   
   if (WEBHOOK_URL) {
     bot.telegram.setWebhook(`${WEBHOOK_URL}/bot`)
-      .then(() => console.log(`Webhook set: ${WEBHOOK_URL}/bot`))
+      .then(() => console.log(`✅ Webhook set: ${WEBHOOK_URL}/bot`))
       .catch(err => console.error('Webhook failed:', err.message));
   } else {
     console.log('No webhook URL, starting polling...');
