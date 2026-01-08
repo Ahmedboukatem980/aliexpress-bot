@@ -74,19 +74,14 @@ async function isUserSubscribed(userId) {
   }
 }
 
-// Updated main keyboard to match the layout in the screenshot using existing buttons
+// Updated main keyboard to match the 3x3 layout in the screenshot
 const mainKeyboard = (ctx) => {
-  let buttons = [];
-  
-  // Custom buttons for all users (Placeholder text based on original buttons)
-  buttons.push(['🏠 القائمة الرئيسية', '📢 نشر عرض']);
-  
-  // Admin specific buttons
-  if (ctx.from.id === ADMIN_ID) {
-    buttons.push(['📊 الإحصائيات', '📢 إرسال رسالة']);
-    buttons.push(['👥 قائمة المشتركين', '🛠️ لوحة التحكم']);
-  }
-  
+  let buttons = [
+    ['🛍️ طلبات', '👥 المشتركين', '🤖 البوت'],
+    ['⚙️ إعدادات', '🔘 أزرار', '✉️ رسالة'],
+    ['🌐 Portals', '🔍 Tracking ID', '🌐 API'],
+    ['📅 معلومات الإشتراك 📅']
+  ];
   return Markup.keyboard(buttons).resize();
 };
 
@@ -123,34 +118,9 @@ bot.command(['start', 'help'], async (ctx) => {
   }
 });
 
-bot.hears('🏠 القائمة الرئيسية', async (ctx) => {
-  await ctx.reply('مرحباً بك في القائمة الرئيسية!', mainKeyboard(ctx));
-});
-
-bot.hears('📢 نشر عرض', (ctx) => ctx.reply('ميزة نشر العرض قيد التطوير.'));
-
-bot.hears('📊 الإحصائيات', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
-  if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
-  try {
-    const total = await pool.query('SELECT COUNT(*) FROM users');
-    const today = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '1 day'");
-    const week = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '7 days'");
-    const month = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '30 days'");
-    const statsText = `📊 إحصائيات البوت:\n👥 إجمالي المشتركين: ${total.rows[0].count}\n📅 مشتركين اليوم: ${today.rows[0].count}\n🗓️ مشتركين الأسبوع: ${week.rows[0].count}\n🌙 مشتركين الشهر: ${month.rows[0].count}`;
-    await ctx.reply(statsText);
-  } catch (e) { ctx.reply('حدث خطأ في جلب الإحصائيات'); }
-});
-
-bot.hears('📢 إرسال رسالة', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
-  broadcastState[ctx.from.id] = 'awaiting_message';
-  await ctx.reply('📝 أرسل الرسالة التي تريد تعميمها على جميع المشتركين:', {
-    reply_markup: { inline_keyboard: [[{ text: '❌ إلغاء', callback_data: 'admin_panel' }]] }
-  });
-});
-
-bot.hears('👥 قائمة المشتركين', async (ctx) => {
+// Mapping buttons to their functions
+bot.hears('🛍️ طلبات', (ctx) => ctx.reply('قائمة الطلبات.'));
+bot.hears('👥 المشتركين', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
   if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
   try {
@@ -162,19 +132,20 @@ bot.hears('👥 قائمة المشتركين', async (ctx) => {
     await ctx.reply(list);
   } catch (e) { ctx.reply('حدث خطأ في جلب القائمة'); }
 });
-
-bot.hears('🛠️ لوحة التحكم', async (ctx) => {
+bot.hears('🤖 البوت', (ctx) => ctx.reply('إحصائيات البوت.'));
+bot.hears('⚙️ إعدادات', (ctx) => ctx.reply('إعدادات البوت.'));
+bot.hears('🔘 أزرار', (ctx) => ctx.reply('تخصيص الأزرار.'));
+bot.hears('✉️ رسالة', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
-  await ctx.reply('🛠️ لوحة التحكم الخاصة بالمسؤول:', {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '📊 الإحصائيات', callback_data: 'stats' }],
-        [{ text: '📢 إرسال رسالة للمشتركين', callback_data: 'broadcast' }],
-        [{ text: '👥 قائمة المشتركين', callback_data: 'user_list' }]
-      ]
-    }
+  broadcastState[ctx.from.id] = 'awaiting_message';
+  await ctx.reply('📝 أرسل الرسالة التي تريد تعميمها على جميع المشتركين:', {
+    reply_markup: { inline_keyboard: [[{ text: '❌ إلغاء', callback_data: 'admin_panel' }]] }
   });
 });
+bot.hears('🌐 Portals', (ctx) => ctx.reply('بوابة بورتالز.'));
+bot.hears('🔍 Tracking ID', (ctx) => ctx.reply('معرف التتبع.'));
+bot.hears('🌐 API', (ctx) => ctx.reply('إعدادات API.'));
+bot.hears('📅 معلومات الإشتراك 📅', (ctx) => ctx.reply('معلومات اشتراكك.'));
 
 bot.action('admin_panel', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
