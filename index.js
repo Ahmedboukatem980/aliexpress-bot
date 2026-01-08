@@ -42,7 +42,6 @@ async function initDB() {
         last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    // Check if last_active column exists, if not add it
     await pool.query(`
       DO $$ 
       BEGIN 
@@ -191,10 +190,17 @@ bot.on('text', async (ctx) => {
     return;
   }
   if (!text.includes('aliexpress.com')) return;
-  const sent = await safeSend(ctx, () => ctx.reply('⏳ جاري البحث عن أفضل العروض 🔍'));
+  
+  // Send the "Searching" GIF Animation
+  const searchingGif = 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2I1ZGNjZjg1YjVlNDU0YjVkNmI1YjVlNDU0YjVkNmI1YjVlNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7TKMGpxvfJukO7xS/giphy.gif';
+  const sent = await safeSend(ctx, () => ctx.sendAnimation(searchingGif, { caption: '⏳ جاري البحث عن أفضل العروض 🔍' }));
+  
   try {
     const coinPi = await portaffFunction(cookies, text);
-    if (!coinPi?.previews?.image_url) return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
+    if (!coinPi?.previews?.image_url) {
+      if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
+      return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
+    }
     await ctx.replyWithPhoto(
       { url: coinPi.previews.image_url },
       {
@@ -202,12 +208,13 @@ bot.on('text', async (ctx) => {
         parse_mode: 'HTML',
       }
     ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
-  } catch (e) { ctx.reply('❗ حدث خطأ أثناء معالجة الرابط'); }
+  } catch (e) { 
+    if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
+    ctx.reply('❗ حدث خطأ أثناء معالجة الرابط'); 
+  }
 });
 
-// Subscription Reminder: Send a message to users inactive for 3+ days
 cron.schedule('0 18 * * *', async () => {
-  console.log('Running subscription reminder cron...');
   if (!pool || !dbConnected) return;
   try {
     const inactiveUsers = await pool.query("SELECT user_id FROM users WHERE last_active < NOW() - INTERVAL '3 days'");
@@ -215,11 +222,9 @@ cron.schedule('0 18 * * *', async () => {
       try {
         await bot.telegram.sendMessage(row.user_id, "👋 اشتقنا لك! هل هناك منتج جديد تريد البحث عن خصومات له؟ أرسل الرابط الآن وجرب حظك مع خصومات العملات الرائعة! 💸");
         await pool.query('UPDATE users SET last_active = NOW() WHERE user_id = $1', [row.user_id]);
-      } catch (e) {
-        console.log(`Failed to send reminder to ${row.user_id}`);
-      }
+      } catch (e) {}
     }
-  } catch (e) { console.error('Reminder error:', e.message); }
+  } catch (e) {}
 }, { timezone: "Africa/Algiers" });
 
 bot.catch((err, ctx) => { console.error('Bot error:', err.message); });
@@ -233,7 +238,7 @@ function getWebhookUrl() {
 const WEBHOOK_URL = getWebhookUrl();
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
-  if (!process.env.token) return console.log('Missing Telegram token');
+  if (!process.env.token) return;
   if (WEBHOOK_URL) {
     bot.telegram.setWebhook(`${WEBHOOK_URL}/bot`)
       .then(() => console.log(`✅ Webhook set: ${WEBHOOK_URL}/bot`))
