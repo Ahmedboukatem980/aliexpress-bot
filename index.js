@@ -74,7 +74,6 @@ async function isUserSubscribed(userId) {
   }
 }
 
-// Main Keyboard (Reply Keyboard)
 const mainKeyboard = (ctx) => {
   let buttons = [['🏠 القائمة الرئيسية']];
   if (ctx.from.id === ADMIN_ID) {
@@ -104,14 +103,16 @@ bot.command(['start', 'help'], async (ctx) => {
   }
 
   await safeSend(ctx, () =>
-    ctx.reply(welcomeMessage, {
-      ...mainKeyboard(ctx),
-      reply_markup: { 
-        inline_keyboard: inlineKeyboard,
-        ...mainKeyboard(ctx).reply_markup
-      }
-    })
+    ctx.reply(welcomeMessage, mainKeyboard(ctx))
   );
+  
+  if (inlineKeyboard.length > 0) {
+    await safeSend(ctx, () =>
+      ctx.reply('روابط إضافية:', {
+        reply_markup: { inline_keyboard: inlineKeyboard }
+      })
+    );
+  }
 });
 
 bot.hears('🏠 القائمة الرئيسية', async (ctx) => {
