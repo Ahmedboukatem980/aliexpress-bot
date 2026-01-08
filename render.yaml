@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: aliexpress-bot
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: token
+        sync: false
+      - key: cook
+        sync: false
+      - key: Channel
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
