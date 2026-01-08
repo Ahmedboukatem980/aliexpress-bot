@@ -3,6 +3,7 @@ const express = require('express');
 const app = express();
 const { portaffFunction } = require('./afflink');
 const { Pool } = require('pg');
+const cron = require('node-cron');
 
 const bot = new Telegraf(process.env.token);
 const cookies = process.env.cook;
@@ -37,8 +38,18 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
         username TEXT,
-        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+    // Check if last_active column exists, if not add it
+    await pool.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='users' AND COLUMN_NAME='last_active') THEN
+          ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        END IF;
+      END $$;
     `);
   } catch (e) {
     console.log('DB init error:', e.message);
@@ -74,21 +85,20 @@ async function isUserSubscribed(userId) {
   }
 }
 
-// Updated keyboard for admin to only show specific buttons
 const mainKeyboard = (ctx) => {
   if (ctx.from.id === ADMIN_ID) {
     return Markup.keyboard([
       ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات']
     ]).resize();
   }
-  return Markup.removeKeyboard(); // Users don't need a keyboard, they just send links
+  return Markup.removeKeyboard();
 };
 
 bot.use(async (ctx, next) => {
   if (ctx.from && pool && dbConnected) {
     try {
       await pool.query(
-        'INSERT INTO users (user_id, username) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING',
+        'INSERT INTO users (user_id, username, last_active) VALUES ($1, $2, NOW()) ON CONFLICT (user_id) DO UPDATE SET last_active = NOW(), username = EXCLUDED.username',
         [ctx.from.id, ctx.from.username]
       );
     } catch (e) {}
@@ -98,7 +108,6 @@ bot.use(async (ctx, next) => {
 
 bot.command(['start', 'help'], async (ctx) => {
   const welcomeMessage = `مرحبا بك معنا، كل ما عليك الان هو إرسال لنا رابط المنتج التي تريد شرائه وسنقوم بتوفير لك أعلى نسبة خصم العملات 👌 أيضا عروض اخرى للمنتج بأسعار ممتازة،`;
-
   await safeSend(ctx, () =>
     ctx.reply(welcomeMessage, mainKeyboard(ctx))
   );
@@ -120,27 +129,21 @@ bot.hears('👥 المشتركين', async (ctx) => {
 bot.hears('📊 الإحصائيات', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
   if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
-
   try {
     const total = await pool.query('SELECT COUNT(*) FROM users');
     const today = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '1 day'");
     const week = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '7 days'");
     const month = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '30 days'");
-
     const statsText = `📊 إحصائيات البوت:
 👥 إجمالي المشتركين: ${total.rows[0].count}
 📅 مشتركين اليوم: ${today.rows[0].count}
 🗓️ مشتركين الأسبوع: ${week.rows[0].count}
 🌙 مشتركين الشهر: ${month.rows[0].count}`;
-
     await ctx.reply(statsText);
-  } catch (e) {
-    await ctx.reply('حدث خطأ في جلب الإحصائيات');
-  }
+  } catch (e) { ctx.reply('حدث خطأ في جلب الإحصائيات'); }
 });
 
 let broadcastState = {};
-
 bot.hears('📢 إرسال رسالة', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
   broadcastState[ctx.from.id] = 'awaiting_message';
@@ -158,14 +161,9 @@ bot.action('cancel_broadcast', async (ctx) => {
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
-
   if (broadcastState[userId] === 'awaiting_message') {
     delete broadcastState[userId];
-    
-    if (!pool || !dbConnected) {
-      return ctx.reply('قاعدة البيانات غير متصلة');
-    }
-
+    if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
     try {
       const users = await pool.query('SELECT user_id FROM users');
       let count = 0;
@@ -177,11 +175,8 @@ bot.on('text', async (ctx) => {
         } catch (e) {}
       }
       return ctx.reply(`✅ تم الإرسال بنجاح إلى ${count} مستخدم.`);
-    } catch (e) {
-      return ctx.reply('حدث خطأ أثناء الإرسال');
-    }
+    } catch (e) { return ctx.reply('حدث خطأ أثناء الإرسال'); }
   }
-
   const subscribed = await isUserSubscribed(userId);
   if (!subscribed) {
     if (Channel && Channel.startsWith('https://')) {
@@ -195,63 +190,55 @@ bot.on('text', async (ctx) => {
     }
     return;
   }
-
-  if (!text.includes('aliexpress.com')) {
-    return;
-  }
-
+  if (!text.includes('aliexpress.com')) return;
   const sent = await safeSend(ctx, () => ctx.reply('⏳ جاري البحث عن أفضل العروض 🔍'));
   try {
     const coinPi = await portaffFunction(cookies, text);
-    if (!coinPi?.previews?.image_url) {
-      return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
-    }
+    if (!coinPi?.previews?.image_url) return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
     await ctx.replyWithPhoto(
       { url: coinPi.previews.image_url },
       {
         caption: `${coinPi.previews.title}\n\n<b>🎉 روابط التخفيض</b>\n\n🔹 تخفيض العملات:\n${coinPi.aff.coin}\n\n🔹 العملات:\n${coinPi.aff.point}\n\n🔹 السوبر ديلز:\n${coinPi.aff.super}\n\n🔹 العرض المحدود:\n${coinPi.aff.limit}\n\n🔹 Bundle deals:\n${coinPi.aff.ther3}\n\n⚠️ غيّر البلد إلى كندا 🇨🇦`,
         parse_mode: 'HTML',
       }
-    ).then(() => {
-      if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
-    });
-  } catch (e) {
-    ctx.reply('❗ حدث خطأ أثناء معالجة الرابط');
-  }
+    ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
+  } catch (e) { ctx.reply('❗ حدث خطأ أثناء معالجة الرابط'); }
 });
 
-bot.catch((err, ctx) => {
-  console.error('Bot error:', err.message);
-});
+// Subscription Reminder: Send a message to users inactive for 3+ days
+cron.schedule('0 18 * * *', async () => {
+  console.log('Running subscription reminder cron...');
+  if (!pool || !dbConnected) return;
+  try {
+    const inactiveUsers = await pool.query("SELECT user_id FROM users WHERE last_active < NOW() - INTERVAL '3 days'");
+    for (const row of inactiveUsers.rows) {
+      try {
+        await bot.telegram.sendMessage(row.user_id, "👋 اشتقنا لك! هل هناك منتج جديد تريد البحث عن خصومات له؟ أرسل الرابط الآن وجرب حظك مع خصومات العملات الرائعة! 💸");
+        await pool.query('UPDATE users SET last_active = NOW() WHERE user_id = $1', [row.user_id]);
+      } catch (e) {
+        console.log(`Failed to send reminder to ${row.user_id}`);
+      }
+    }
+  } catch (e) { console.error('Reminder error:', e.message); }
+}, { timezone: "Africa/Algiers" });
+
+bot.catch((err, ctx) => { console.error('Bot error:', err.message); });
 
 const PORT = process.env.PORT || 5000;
-
 function getWebhookUrl() {
-  if (process.env.RENDER_EXTERNAL_URL) {
-    return process.env.RENDER_EXTERNAL_URL;
-  }
-  if (process.env.REPLIT_DEV_DOMAIN) {
-    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  }
+  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
+  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
   return null;
 }
-
 const WEBHOOK_URL = getWebhookUrl();
-
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
-  
-  if (!process.env.token) {
-    console.log('Missing Telegram token');
-    return;
-  }
-  
+  if (!process.env.token) return console.log('Missing Telegram token');
   if (WEBHOOK_URL) {
     bot.telegram.setWebhook(`${WEBHOOK_URL}/bot`)
       .then(() => console.log(`✅ Webhook set: ${WEBHOOK_URL}/bot`))
       .catch(err => console.error('Webhook failed:', err.message));
   } else {
-    console.log('No webhook URL, starting polling...');
     bot.launch().then(() => console.log('Bot started with polling'));
   }
 });
