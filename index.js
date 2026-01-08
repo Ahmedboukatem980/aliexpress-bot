@@ -74,20 +74,12 @@ async function isUserSubscribed(userId) {
   }
 }
 
-// Updated main keyboard to match the layout in the screenshot
+// Return to original buttons layout
 const mainKeyboard = (ctx) => {
-  let buttons = [];
-  
-  // Custom buttons for all users
-  buttons.push(['🔗 توليد رابط أفلييت', '📢 نشر عرض']);
-  buttons.push(['📋 قائمة الانتظار', '🛑 إيقاف النشر التلقائي']);
-  
-  // Admin specific buttons
+  let buttons = [['🏠 القائمة الرئيسية']];
   if (ctx.from.id === ADMIN_ID) {
-    buttons.push(['📊 الإحصائيات', '⚙️ التفضيلات']);
-    buttons.push(['🛠️ الإعدادات']);
+    buttons.push(['🛠️ لوحة التحكم']);
   }
-  
   return Markup.keyboard(buttons).resize();
 };
 
@@ -104,7 +96,7 @@ bot.use(async (ctx, next) => {
 });
 
 bot.command(['start', 'help'], async (ctx) => {
-  const welcomeMessage = `مرحبا بك معنا، كل ما عليك الان هو إرسال لنا رابط المنتج التي تريد شرائه وسنقوم بتوفير لك أعلى نسبة خصم العملات 👌 أيضا عروض اخرى للمنتج بأسعار ممتازة،`;
+  const welcomeMessage = `مرحبا بك معنا، كل ما عليك الان هو إرسال لنا رابط المنتج التي تريد شرائه وسنقوم بتوفير لك أعلى نسبة خصم العملات 👌 أيضا عروض اخرى للمنتج بأسعار منتزة،`;
 
   let inlineKeyboard = [];
   if (Channel && Channel.startsWith('https://')) {
@@ -124,30 +116,11 @@ bot.command(['start', 'help'], async (ctx) => {
   }
 });
 
-// Handling main keyboard button presses
-bot.hears('🔗 توليد رابط أفلييت', (ctx) => ctx.reply('الرجاء إرسال رابط المنتج لتوليد رابط الأفلييت.'));
-bot.hears('📢 نشر عرض', (ctx) => ctx.reply('ميزة نشر العرض قيد التطوير.'));
-bot.hears('📋 قائمة الانتظار', (ctx) => ctx.reply('قائمة الانتظار فارغة حالياً.'));
-bot.hears('🛑 إيقاف النشر التلقائي', (ctx) => ctx.reply('تم إيقاف النشر التلقائي.'));
-
-bot.hears('📊 الإحصائيات', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
-  // Trigger the same logic as the inline button for stats
-  const callbackContext = { ...ctx, answerCbQuery: async () => {}, editMessageText: async (text, extra) => ctx.reply(text, extra) };
-  // We can just call a function but for simplicity in fast mode we reuse the text logic below
-  if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
-  try {
-    const total = await pool.query('SELECT COUNT(*) FROM users');
-    const today = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '1 day'");
-    const week = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '7 days'");
-    const month = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '30 days'");
-    const statsText = `📊 إحصائيات البوت:\n👥 إجمالي المشتركين: ${total.rows[0].count}\n📅 مشتركين اليوم: ${today.rows[0].count}\n🗓️ مشتركين الأسبوع: ${week.rows[0].count}\n🌙 مشتركين الشهر: ${month.rows[0].count}`;
-    await ctx.reply(statsText);
-  } catch (e) { ctx.reply('حدث خطأ في جلب الإحصائيات'); }
+bot.hears('🏠 القائمة الرئيسية', async (ctx) => {
+  await ctx.reply('مرحباً بك في القائمة الرئيسية!', mainKeyboard(ctx));
 });
 
-bot.hears('⚙️ التفضيلات', (ctx) => ctx.reply('إعدادات التفضيلات.'));
-bot.hears('🛠️ الإعدادات', async (ctx) => {
+bot.hears('🛠️ لوحة التحكم', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
   await ctx.reply('🛠️ لوحة التحكم الخاصة بالمسؤول:', {
     reply_markup: {
