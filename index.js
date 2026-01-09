@@ -224,7 +224,7 @@ bot.on('text', async (ctx) => {
   // Send the hourglass animated GIF from local server as waiting indicator
   const baseUrl = process.env.RENDER_EXTERNAL_URL || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '');
   const hourglassGif = baseUrl ? `${baseUrl}/public/hourglass.gif` : 'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif';
-  const sent = await safeSend(ctx, () => ctx.sendAnimation(hourglassGif, { caption: '⏳ جاري البحث عن أفضل العروض 🔍' }));
+  const sent = await safeSend(ctx, () => ctx.sendAnimation(hourglassGif));
   
   try {
     const coinPi = await portaffFunction(cookies, text);
