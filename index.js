@@ -92,7 +92,7 @@ const mainKeyboard = (ctx) => {
   if (ctx.from.id === ADMIN_ID) {
     return Markup.keyboard([
       ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات'],
-      ['🔘 أزرار', '⚙️ إعدادات الأزرار']
+      ['⚙️ إعدادات الأزرار']
     ]).resize();
   }
   return Markup.removeKeyboard();
@@ -211,14 +211,6 @@ bot.hears('📊 الإحصائيات', async (ctx) => {
   } catch (e) { ctx.reply('حدث خطأ في جلب الإحصائيات'); }
 });
 
-bot.hears('🔘 أزرار', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
-  broadcastState[ctx.from.id] = 'awaiting_button_data';
-  await ctx.reply('🛠️ أرسل البيانات لإنشاء منشور بأزرار شفافة.\nالصيغة:\nالنص\nاسم الزر | الرابط\n\nمثال:\nهذا منتج رائع\nاشتري الآن | https://google.com', {
-    reply_markup: { inline_keyboard: [[{ text: '❌ إلغاء', callback_data: 'cancel_broadcast' }]] }
-  });
-});
-
 bot.hears('⚙️ إعدادات الأزرار', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
   
@@ -293,37 +285,6 @@ bot.on('text', async (ctx) => {
     return ctx.reply(`✅ تم حفظ الزر بنجاح!\n\n${btnText}\n${isCallback ? '📌 زر منبثق' : '🔗 ' + btnUrl}`, mainKeyboard(ctx));
   }
   
-  if (broadcastState[userId] === 'awaiting_button_data') {
-    delete broadcastState[userId];
-    const lines = text.split('\n');
-    const messageText = lines[0];
-    const buttons = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split('|');
-      if (parts.length === 2) {
-        buttons.push([Markup.button.url(parts[0].trim(), parts[1].trim())]);
-      }
-    }
-    
-    if (buttons.length === 0) {
-      return ctx.reply('❌ تنسيق غير صحيح. يرجى إرسال النص ثم الأزرار بالصيغة المطلوبة.');
-    }
-
-    try {
-      const users = await pool.query('SELECT user_id FROM users');
-      let count = 0;
-      await ctx.reply(`⏳ بدأ إرسال المنشور مع الأزرار إلى ${users.rows.length} مستخدم...`);
-      for (const row of users.rows) {
-        try {
-          await bot.telegram.sendMessage(row.user_id, messageText, Markup.inlineKeyboard(buttons));
-          count++;
-        } catch (e) {}
-      }
-      return ctx.reply(`✅ تم إرسال المنشور بنجاح إلى ${count} مستخدم.`);
-    } catch (e) { return ctx.reply('حدث خطأ أثناء الإرسال'); }
-  }
-
   if (broadcastState[userId] === 'awaiting_message') {
     delete broadcastState[userId];
     if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
