@@ -196,6 +196,10 @@ bot.action('cancel_broadcast', async (ctx) => {
   await ctx.editMessageText('تم إلغاء عملية الإرسال.');
 });
 
+bot.action('note_info', async (ctx) => {
+  await ctx.answerCbQuery('⚠️ غيّر البلد إلى كندا 🇨🇦 للحصول على أفضل الخصومات', { show_alert: true });
+});
+
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
@@ -276,15 +280,13 @@ bot.on('text', async (ctx) => {
     await ctx.replyWithPhoto(
       { url: coinPi.previews.image_url },
       {
-        caption: `${coinPi.previews.title}\n\n<b>🎉 روابط التخفيض</b>\n\n⚠️ غيّر البلد إلى كندا 🇨🇦`,
+        caption: `🛍️ اسم المنتج: ${coinPi.previews.title}\n\n🛒 رابط تخفيض النقاط:\n${coinPi.aff.coin}\n\n🛒 رابط تخفيض النقاط القديم:\n${coinPi.aff.point}\n\n🛒 رابط السوبر ديلز:\n${coinPi.aff.super}\n\n🛒 رابط العرض المحدود:\n${coinPi.aff.limit}\n\n🛒 رابط عرض bundle:\n${coinPi.aff.ther3}`,
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🔹 تخفيض العملات', url: coinPi.aff.coin }],
-            [{ text: '🔹 العملات', url: coinPi.aff.point }],
-            [{ text: '🔹 السوبر ديلز', url: coinPi.aff.super }],
-            [{ text: '🔹 العرض المحدود', url: coinPi.aff.limit }],
-            [{ text: '🔹 Bundle deals', url: coinPi.aff.ther3 }]
+            [{ text: '🛍️ لمزيد من العروض اشترك في قناتنا من هنا', url: Channel || 'https://t.me/channel' }],
+            [{ text: '📦 بوت التتبع', url: 'https://t.me/trackbot' }],
+            [{ text: '🔴 ملاحظة', callback_data: 'note_info' }]
           ]
         }
       }
