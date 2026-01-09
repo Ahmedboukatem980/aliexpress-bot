@@ -191,9 +191,9 @@ bot.on('text', async (ctx) => {
   }
   if (!text.includes('aliexpress.com')) return;
   
-  // Send the "Searching" GIF Animation
-  const searchingGif = 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2I1ZGNjZjg1YjVlNDU0YjVkNmI1YjVlNDU0YjVkNmI1YjVlNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7TKMGpxvfJukO7xS/giphy.gif';
-  const sent = await safeSend(ctx, () => ctx.sendAnimation(searchingGif, { caption: '⏳ جاري البحث عن أفضل العروض 🔍' }));
+  // Send the "Hourglass" GIF Animation
+  const hourglassGif = 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpob2Y3MWRzMTQ3Nnc0MGRpNm02dGZ5OWV6b3lsdmd0eHljb2ZkdyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VvM5oN84S603O/giphy.gif';
+  const sent = await safeSend(ctx, () => ctx.sendAnimation(hourglassGif, { caption: '⏳ جاري البحث عن أفضل العروض 🔍' }));
   
   try {
     const coinPi = await portaffFunction(cookies, text);
