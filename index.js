@@ -56,6 +56,7 @@ async function initDB() {
 }
 
 app.use(express.json());
+app.use('/public', express.static('public'));
 app.use(bot.webhookCallback('/bot'));
 
 app.get('/', (req, res) => res.send('Bot is running!'));
@@ -192,7 +193,8 @@ bot.on('text', async (ctx) => {
   if (!text.includes('aliexpress.com')) return;
   
   // Send the golden hourglass animated GIF as waiting indicator
-  const hourglassGif = 'https://media.giphy.com/media/26n6ziTEeDDbowBkQ/giphy.gif';
+  const baseUrl = process.env.RENDER_EXTERNAL_URL || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '');
+  const hourglassGif = baseUrl ? `${baseUrl}/public/hourglass.gif` : 'https://media.giphy.com/media/26n6ziTEeDDbowBkQ/giphy.gif';
   const sent = await safeSend(ctx, () => ctx.sendAnimation(hourglassGif, { caption: '⏳ جاري البحث عن أفضل العروض 🔍' }));
   
   try {
