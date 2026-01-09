@@ -221,8 +221,9 @@ bot.on('text', async (ctx) => {
   }
   if (!text.includes('aliexpress.com')) return;
   
-  // Send the hourglass animated GIF with transparent background as waiting indicator
-  const hourglassGif = 'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif';
+  // Send the hourglass animated GIF from local server as waiting indicator
+  const baseUrl = process.env.RENDER_EXTERNAL_URL || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '');
+  const hourglassGif = baseUrl ? `${baseUrl}/public/hourglass.gif` : 'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif';
   const sent = await safeSend(ctx, () => ctx.sendAnimation(hourglassGif, { caption: '⏳ جاري البحث عن أفضل العروض 🔍' }));
   
   try {
