@@ -128,6 +128,10 @@ async function portaffFunction(cookie, ids) {
 
     const promoResults = await Promise.all(promoRequests);
 
+    if (promoResults.every(pr => pr.data === null)) {
+        throw new Error("❌ فشل إنشاء جميع الروابط. قد تكون الكوكيز منتهية الصلاحية.");
+    }
+
     for (const pr of promoResults) {
         result.aff[pr.type] = pr.data;
     }

@@ -72,7 +72,11 @@ async function safeSend(ctx, fn) {
       console.log(`User ${ctx.chat?.id} blocked the bot`);
       return null;
     }
-    console.error(err);
+    if (err.code === 429) {
+      console.log(`Rate limited, waiting...`);
+      return null;
+    }
+    console.error('SafeSend Error:', err.message);
     return null;
   }
 }
