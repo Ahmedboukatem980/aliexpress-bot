@@ -6,6 +6,9 @@ const { Pool } = require('pg');
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
+const { getText } = require('./translations');
+
+const userLangs = {};
 
 const bot = new Telegraf(process.env.token);
 const cookies = process.env.cook;
@@ -52,7 +55,16 @@ async function initDB() {
         END IF;
       END $$;
     `);
+    await pool.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='users' AND COLUMN_NAME='lang') THEN
+          ALTER TABLE users ADD COLUMN lang TEXT DEFAULT 'ar';
+        END IF;
+      END $$;
+    `);
     await loadButtonSettings();
+    await loadUserLanguages();
   } catch (e) {
     console.log('DB init error:', e.message);
   }
@@ -139,6 +151,28 @@ async function saveButtonSetting(id, text, url, isCallback = false) {
   } catch (e) { console.log('Error saving button setting:', e.message); }
 }
 
+async function loadUserLanguages() {
+  if (!pool || !dbConnected) return;
+  try {
+    const result = await pool.query('SELECT user_id, lang FROM users WHERE lang IS NOT NULL');
+    result.rows.forEach(row => {
+      userLangs[row.user_id] = row.lang;
+    });
+  } catch (e) { console.log('Error loading user languages:', e.message); }
+}
+
+async function setUserLang(userId, lang) {
+  userLangs[userId] = lang;
+  if (!pool || !dbConnected) return;
+  try {
+    await pool.query('UPDATE users SET lang = $1 WHERE user_id = $2', [lang, userId]);
+  } catch (e) { console.log('Error saving user language:', e.message); }
+}
+
+function getLang(userId) {
+  return userLangs[userId] || 'ar';
+}
+
 bot.use(async (ctx, next) => {
   if (ctx.from && pool && dbConnected) {
     try {
@@ -152,10 +186,37 @@ bot.use(async (ctx, next) => {
 });
 
 bot.command(['start', 'help'], async (ctx) => {
-  const welcomeMessage = `مرحبا بك معنا، كل ما عليك الان هو إرسال لنا رابط المنتج التي تريد شرائه وسنقوم بتوفير لك أعلى نسبة خصم العملات 👌 أيضا عروض اخرى للمنتج بأسعار ممتازة،`;
+  const lang = getLang(ctx.from.id);
+  const welcomeMessage = getText(lang, 'welcome');
   await safeSend(ctx, () =>
     ctx.reply(welcomeMessage, mainKeyboard(ctx))
   );
+});
+
+bot.command('lang', async (ctx) => {
+  await ctx.reply(getText(getLang(ctx.from.id), 'chooseLanguage'), Markup.inlineKeyboard([
+    [Markup.button.callback('🇩🇿 العربية', 'set_lang_ar')],
+    [Markup.button.callback('🇫🇷 Français', 'set_lang_fr')],
+    [Markup.button.callback('🇬🇧 English', 'set_lang_en')]
+  ]));
+});
+
+bot.action('set_lang_ar', async (ctx) => {
+  await setUserLang(ctx.from.id, 'ar');
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(getText('ar', 'languageChanged'));
+});
+
+bot.action('set_lang_fr', async (ctx) => {
+  await setUserLang(ctx.from.id, 'fr');
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(getText('fr', 'languageChanged'));
+});
+
+bot.action('set_lang_en', async (ctx) => {
+  await setUserLang(ctx.from.id, 'en');
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(getText('en', 'languageChanged'));
 });
 
 bot.hears('👥 المشتركين', async (ctx) => {
