@@ -276,8 +276,17 @@ bot.on('text', async (ctx) => {
     await ctx.replyWithPhoto(
       { url: coinPi.previews.image_url },
       {
-        caption: `${coinPi.previews.title}\n\n<b>🎉 روابط التخفيض</b>\n\n🔹 تخفيض العملات:\n${coinPi.aff.coin}\n\n🔹 العملات:\n${coinPi.aff.point}\n\n🔹 السوبر ديلز:\n${coinPi.aff.super}\n\n🔹 العرض المحدود:\n${coinPi.aff.limit}\n\n🔹 Bundle deals:\n${coinPi.aff.ther3}\n\n⚠️ غيّر البلد إلى كندا 🇨🇦`,
+        caption: `${coinPi.previews.title}\n\n<b>🎉 روابط التخفيض</b>\n\n⚠️ غيّر البلد إلى كندا 🇨🇦`,
         parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔹 تخفيض العملات', url: coinPi.aff.coin }],
+            [{ text: '🔹 العملات', url: coinPi.aff.point }],
+            [{ text: '🔹 السوبر ديلز', url: coinPi.aff.super }],
+            [{ text: '🔹 العرض المحدود', url: coinPi.aff.limit }],
+            [{ text: '🔹 Bundle deals', url: coinPi.aff.ther3 }]
+          ]
+        }
       }
     ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
   } catch (e) { 
