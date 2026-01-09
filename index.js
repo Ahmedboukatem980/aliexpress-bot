@@ -52,6 +52,7 @@ async function initDB() {
         END IF;
       END $$;
     `);
+    await loadButtonSettings();
   } catch (e) {
     console.log('DB init error:', e.message);
   }
@@ -91,11 +92,48 @@ const mainKeyboard = (ctx) => {
   if (ctx.from.id === ADMIN_ID) {
     return Markup.keyboard([
       ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات'],
-      ['🔘 أزرار']
+      ['🔘 أزرار', '⚙️ إعدادات الأزرار']
     ]).resize();
   }
   return Markup.removeKeyboard();
 };
+
+let buttonSettings = {
+  btn1: { text: '🛍️ لمزيد من العروض اشترك في قناتنا من هنا', url: '' },
+  btn2: { text: '📦 بوت التتبع', url: 'https://t.me/trackbot' },
+  btn3: { text: '🔴 ملاحظة', url: '', isCallback: true }
+};
+
+async function loadButtonSettings() {
+  if (!pool || !dbConnected) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS button_settings (
+        id TEXT PRIMARY KEY,
+        btn_text TEXT,
+        btn_url TEXT,
+        is_callback BOOLEAN DEFAULT FALSE
+      );
+    `);
+    const result = await pool.query('SELECT * FROM button_settings');
+    result.rows.forEach(row => {
+      if (buttonSettings[row.id]) {
+        buttonSettings[row.id] = { text: row.btn_text, url: row.btn_url, isCallback: row.is_callback };
+      }
+    });
+  } catch (e) { console.log('Error loading button settings:', e.message); }
+}
+
+async function saveButtonSetting(id, text, url, isCallback = false) {
+  if (!pool || !dbConnected) return;
+  try {
+    await pool.query(
+      'INSERT INTO button_settings (id, btn_text, btn_url, is_callback) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET btn_text = $2, btn_url = $3, is_callback = $4',
+      [id, text, url, isCallback]
+    );
+    buttonSettings[id] = { text, url, isCallback };
+  } catch (e) { console.log('Error saving button setting:', e.message); }
+}
 
 bot.use(async (ctx, next) => {
   if (ctx.from && pool && dbConnected) {
@@ -181,6 +219,39 @@ bot.hears('🔘 أزرار', async (ctx) => {
   });
 });
 
+bot.hears('⚙️ إعدادات الأزرار', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  
+  const currentSettings = `⚙️ الأزرار الحالية تحت المنشورات:\n\n1️⃣ ${buttonSettings.btn1.text}\n🔗 ${buttonSettings.btn1.url || Channel || 'رابط القناة'}\n\n2️⃣ ${buttonSettings.btn2.text}\n🔗 ${buttonSettings.btn2.url || 'غير محدد'}\n\n3️⃣ ${buttonSettings.btn3.text}\n${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗 ' + buttonSettings.btn3.url}`;
+  
+  await ctx.reply(currentSettings, Markup.inlineKeyboard([
+    [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
+    [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
+    [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')]
+  ]));
+});
+
+bot.action('edit_btn1', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
+  broadcastState[ctx.from.id] = 'editing_btn1';
+  await ctx.reply('✏️ أرسل النص والرابط للزر الأول:\nالصيغة: النص | الرابط\n\nمثال:\n🛍️ اشترك في قناتنا | https://t.me/yourchannel');
+});
+
+bot.action('edit_btn2', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
+  broadcastState[ctx.from.id] = 'editing_btn2';
+  await ctx.reply('✏️ أرسل النص والرابط للزر الثاني:\nالصيغة: النص | الرابط\n\nمثال:\n📦 بوت التتبع | https://t.me/trackbot');
+});
+
+bot.action('edit_btn3', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
+  broadcastState[ctx.from.id] = 'editing_btn3';
+  await ctx.reply('✏️ أرسل النص والرابط للزر الثالث:\nالصيغة: النص | الرابط\n\nأو أرسل "منبثق" ليظهر كرسالة منبثقة:\nالنص | منبثق\n\nمثال:\n🔴 ملاحظة | منبثق');
+});
+
 let broadcastState = {};
 bot.hears('📢 إرسال رسالة', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
@@ -203,6 +274,24 @@ bot.action('note_info', async (ctx) => {
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
+  
+  // Handle button editing
+  if (broadcastState[userId] && broadcastState[userId].startsWith('editing_btn')) {
+    const btnId = broadcastState[userId].replace('editing_', '');
+    delete broadcastState[userId];
+    
+    const parts = text.split('|');
+    if (parts.length !== 2) {
+      return ctx.reply('❌ تنسيق غير صحيح. استخدم: النص | الرابط');
+    }
+    
+    const btnText = parts[0].trim();
+    const btnUrl = parts[1].trim();
+    const isCallback = btnUrl.toLowerCase() === 'منبثق';
+    
+    await saveButtonSetting(btnId, btnText, isCallback ? '' : btnUrl, isCallback);
+    return ctx.reply(`✅ تم حفظ الزر بنجاح!\n\n${btnText}\n${isCallback ? '📌 زر منبثق' : '🔗 ' + btnUrl}`, mainKeyboard(ctx));
+  }
   
   if (broadcastState[userId] === 'awaiting_button_data') {
     delete broadcastState[userId];
@@ -277,18 +366,29 @@ bot.on('text', async (ctx) => {
       if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
       return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
     }
+    // Build dynamic inline keyboard from buttonSettings
+    const inlineButtons = [];
+    if (buttonSettings.btn1.text) {
+      const btn1Url = buttonSettings.btn1.url || Channel || 'https://t.me/channel';
+      inlineButtons.push([{ text: buttonSettings.btn1.text, url: btn1Url }]);
+    }
+    if (buttonSettings.btn2.text && buttonSettings.btn2.url) {
+      inlineButtons.push([{ text: buttonSettings.btn2.text, url: buttonSettings.btn2.url }]);
+    }
+    if (buttonSettings.btn3.text) {
+      if (buttonSettings.btn3.isCallback) {
+        inlineButtons.push([{ text: buttonSettings.btn3.text, callback_data: 'note_info' }]);
+      } else if (buttonSettings.btn3.url) {
+        inlineButtons.push([{ text: buttonSettings.btn3.text, url: buttonSettings.btn3.url }]);
+      }
+    }
+
     await ctx.replyWithPhoto(
       { url: coinPi.previews.image_url },
       {
         caption: `🛍️ اسم المنتج: ${coinPi.previews.title}\n\n🛒 رابط تخفيض النقاط:\n${coinPi.aff.coin}\n\n🛒 رابط تخفيض النقاط القديم:\n${coinPi.aff.point}\n\n🛒 رابط السوبر ديلز:\n${coinPi.aff.super}\n\n🛒 رابط العرض المحدود:\n${coinPi.aff.limit}\n\n🛒 رابط عرض bundle:\n${coinPi.aff.ther3}`,
         parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🛍️ لمزيد من العروض اشترك في قناتنا من هنا', url: Channel || 'https://t.me/channel' }],
-            [{ text: '📦 بوت التتبع', url: 'https://t.me/trackbot' }],
-            [{ text: '🔴 ملاحظة', callback_data: 'note_info' }]
-          ]
-        }
+        reply_markup: { inline_keyboard: inlineButtons }
       }
     ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
   } catch (e) { 
