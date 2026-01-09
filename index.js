@@ -4,6 +4,8 @@ const app = express();
 const { portaffFunction } = require('./afflink');
 const { Pool } = require('pg');
 const cron = require('node-cron');
+const fs = require('fs');
+const path = require('path');
 
 const bot = new Telegraf(process.env.token);
 const cookies = process.env.cook;
@@ -88,7 +90,8 @@ async function isUserSubscribed(userId) {
 const mainKeyboard = (ctx) => {
   if (ctx.from.id === ADMIN_ID) {
     return Markup.keyboard([
-      ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات']
+      ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات'],
+      ['📥 تحميل قائمة المشتركين']
     ]).resize();
   }
   return Markup.removeKeyboard();
@@ -141,6 +144,28 @@ bot.hears('📊 الإحصائيات', async (ctx) => {
 🌙 مشتركين الشهر: ${month.rows[0].count}`;
     await ctx.reply(statsText);
   } catch (e) { ctx.reply('حدث خطأ في جلب الإحصائيات'); }
+});
+
+bot.hears('📥 تحميل قائمة المشتركين', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
+  
+  try {
+    const result = await pool.query('SELECT user_id, username, joined_at FROM users ORDER BY joined_at DESC');
+    let csvContent = 'User ID,Username,Joined At\n';
+    result.rows.forEach(row => {
+      csvContent += `${row.user_id},${row.username || ''},${row.joined_at.toISOString()}\n`;
+    });
+    
+    const filePath = path.join(__dirname, 'users_list.csv');
+    fs.writeFileSync(filePath, csvContent);
+    
+    await ctx.replyWithDocument({ source: filePath, filename: 'users_list.csv' });
+    fs.unlinkSync(filePath); // Delete file after sending
+  } catch (e) {
+    console.error(e);
+    ctx.reply('حدث خطأ أثناء تصدير القائمة');
+  }
 });
 
 let broadcastState = {};
