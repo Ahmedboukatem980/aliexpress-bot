@@ -191,8 +191,8 @@ bot.on('text', async (ctx) => {
   }
   if (!text.includes('aliexpress.com')) return;
   
-  // Send the golden hourglass image as waiting indicator
-  const hourglassGif = 'https://media.giphy.com/media/3o7TKUZfJKUKuSWTZe/giphy.gif';
+  // Send the golden hourglass animated GIF as waiting indicator
+  const hourglassGif = 'https://media.giphy.com/media/26n6ziTEeDDbowBkQ/giphy.gif';
   const sent = await safeSend(ctx, () => ctx.sendAnimation(hourglassGif, { caption: '⏳ جاري البحث عن أفضل العروض 🔍' }));
   
   try {
