@@ -322,7 +322,7 @@ bot.on('text', async (ctx) => {
   
   // Send the waiting image from local server as waiting indicator
   const baseUrl = process.env.RENDER_EXTERNAL_URL || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '');
-  const waitingImg = baseUrl ? `${baseUrl}/public/waiting.jpg` : 'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif';
+  const waitingImg = baseUrl ? `${baseUrl}/public/waiting.png` : 'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif';
   const sent = await safeSend(ctx, () => ctx.replyWithPhoto(waitingImg));
   
   try {
