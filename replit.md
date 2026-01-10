@@ -6,7 +6,11 @@ A Telegram bot that generates AliExpress affiliate links with discounts. Users s
 ## Features
 - **Affiliate Link Generation**: Converts AliExpress links to affiliate links with various discount types
 - **Channel Subscription Check**: Users must subscribe to a channel before using the bot
-- **Admin Panel** (New): Admin-only control panel with:
+- **Package Tracking** (New): Users can track their AliExpress shipments using the "📦 تتبع شحنتي" button
+  - Enter tracking number to get shipment status
+  - Shows current location, status, and recent updates
+  - Uses TrackingMore API (requires API key)
+- **Admin Panel**: Admin-only control panel with:
   - Broadcast messages to all subscribers
   - View subscriber statistics (daily, weekly, monthly)
   - View subscriber list
@@ -19,6 +23,7 @@ Required on Render:
 - `Channel` - Channel URL for subscription check (e.g., https://t.me/yourchannel)
 - `ADMIN_ID` - Your Telegram user ID (numeric) to access admin panel
 - `DATABASE_URL` - PostgreSQL connection string
+- `TRACKING_API_KEY` - TrackingMore API key for package tracking (optional, get from https://www.trackingmore.com)
 
 ## Deployment
 This bot is deployed on Render. After pushing to GitHub:
