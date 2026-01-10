@@ -318,7 +318,9 @@ bot.on('text', async (ctx) => {
     }
     return;
   }
-  if (!text.includes('aliexpress.com')) return;
+  if (!text.includes('aliexpress.com')) {
+    return ctx.reply('🚫 الرجاء إرسال رابط من AliExpress فقط.');
+  }
   
   // Send the waiting image from local server as waiting indicator
   const baseUrl = process.env.RENDER_EXTERNAL_URL || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '');
