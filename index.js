@@ -7,13 +7,10 @@ const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
 
-const axios = require('axios');
-
 const bot = new Telegraf(process.env.token);
 const cookies = process.env.cook;
 const Channel = process.env.Channel || '';
 const ADMIN_ID = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
-const TRACKING_API_KEY = process.env.TRACKING_API_KEY || '';
 
 let pool = null;
 let dbConnected = false;
@@ -99,13 +96,10 @@ const mainKeyboard = (ctx) => {
   if (ctx.from.id === ADMIN_ID) {
     return Markup.keyboard([
       ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات'],
-      ['⚙️ إعدادات الأزرار'],
-      ['📦 تتبع شحنتي']
+      ['⚙️ إعدادات الأزرار']
     ]).resize();
   }
-  return Markup.keyboard([
-    ['📦 تتبع شحنتي']
-  ]).resize();
+  return Markup.removeKeyboard();
 };
 
 let buttonSettings = {
@@ -273,140 +267,9 @@ bot.action('note_info', async (ctx) => {
   await ctx.answerCbQuery('⚠️ غيّر البلد إلى كندا 🇨🇦 للحصول على أفضل الخصومات', { show_alert: true });
 });
 
-let trackingState = {};
-
-async function trackPackage(trackingNumber) {
-  if (!TRACKING_API_KEY) {
-    return { error: 'لم يتم تكوين خدمة التتبع بعد. يرجى التواصل مع المسؤول.' };
-  }
-  
-  try {
-    const response = await axios.post(
-      'https://api.trackingmore.com/v4/trackings/create',
-      {
-        tracking_number: trackingNumber,
-        courier_code: 'cainiao'
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Trackingmore-Api-Key': TRACKING_API_KEY
-        },
-        timeout: 15000
-      }
-    );
-    
-    if (response.data && response.data.data) {
-      return response.data.data;
-    }
-    return { error: 'لم يتم العثور على معلومات للشحنة' };
-  } catch (err) {
-    if (err.response?.status === 4016 || err.response?.data?.meta?.code === 4016) {
-      try {
-        const getResponse = await axios.get(
-          `https://api.trackingmore.com/v4/trackings/get?tracking_numbers=${trackingNumber}`,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'Trackingmore-Api-Key': TRACKING_API_KEY
-            },
-            timeout: 15000
-          }
-        );
-        
-        if (getResponse.data?.data?.[0]) {
-          return getResponse.data.data[0];
-        }
-      } catch (e) {
-        console.log('Tracking get error:', e.message);
-      }
-    }
-    console.log('Tracking error:', err.response?.data || err.message);
-    return { error: 'حدث خطأ أثناء تتبع الشحنة. تأكد من صحة الرقم وحاول مرة أخرى.' };
-  }
-}
-
-function formatTrackingResult(data) {
-  if (data.error) return `❌ ${data.error}`;
-  
-  const statusMap = {
-    'pending': '⏳ في الانتظار',
-    'notfound': '🔍 لم يتم العثور على معلومات',
-    'transit': '🚚 في الطريق',
-    'pickup': '📬 جاهز للاستلام',
-    'delivered': '✅ تم التسليم',
-    'expired': '⌛ منتهي الصلاحية',
-    'undelivered': '❌ لم يتم التسليم',
-    'exception': '⚠️ يوجد مشكلة',
-    'inforeceived': '📋 تم استلام المعلومات'
-  };
-  
-  const status = statusMap[data.delivery_status] || data.delivery_status || 'غير معروف';
-  let message = `📦 **معلومات تتبع الشحنة:**\n\n`;
-  message += `🔢 **الرقم:** \`${data.tracking_number}\`\n`;
-  message += `📍 **الحالة:** ${status}\n`;
-  
-  if (data.origin_info?.courier_code) {
-    message += `🏢 **شركة الشحن:** ${data.origin_info.courier_code}\n`;
-  }
-  
-  if (data.destination_country) {
-    message += `🌍 **بلد الوصول:** ${data.destination_country}\n`;
-  }
-  
-  if (data.origin_info?.trackinfo && data.origin_info.trackinfo.length > 0) {
-    message += `\n📋 **آخر التحديثات:**\n`;
-    const recentUpdates = data.origin_info.trackinfo.slice(0, 5);
-    recentUpdates.forEach((update, index) => {
-      const date = update.Date || update.checkpoint_date || '';
-      const details = update.StatusDescription || update.checkpoint_delivery_status || '';
-      const location = update.Details || update.location || '';
-      message += `\n${index + 1}. ${date}\n   ${details}${location ? ` - ${location}` : ''}\n`;
-    });
-  }
-  
-  message += `\n_شكراً لاستخدامك بوت التوفير!_`;
-  return message;
-}
-
-bot.hears('📦 تتبع شحنتي', async (ctx) => {
-  trackingState[ctx.from.id] = 'awaiting_tracking';
-  await ctx.reply('📦 أرسل رقم التتبع الخاص بشحنتك:\n\n_مثال: LP00123456789CN_', {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [[{ text: '❌ إلغاء', callback_data: 'cancel_tracking' }]]
-    }
-  });
-});
-
-bot.action('cancel_tracking', async (ctx) => {
-  delete trackingState[ctx.from.id];
-  await ctx.answerCbQuery('تم الإلغاء');
-  await ctx.editMessageText('تم إلغاء عملية التتبع.');
-});
-
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
-  
-  // Handle tracking number input
-  if (trackingState[userId] === 'awaiting_tracking') {
-    delete trackingState[userId];
-    const trackingNumber = text.trim().toUpperCase();
-    
-    if (trackingNumber.length < 8 || trackingNumber.length > 30) {
-      return ctx.reply('❌ رقم التتبع غير صحيح. يجب أن يكون بين 8 و 30 حرفاً.', mainKeyboard(ctx));
-    }
-    
-    const waitingMsg = await ctx.reply('⏳ جاري البحث عن معلومات الشحنة...');
-    
-    const result = await trackPackage(trackingNumber);
-    const formattedResult = formatTrackingResult(result);
-    
-    await ctx.deleteMessage(waitingMsg.message_id).catch(() => {});
-    await ctx.reply(formattedResult, { parse_mode: 'Markdown', ...mainKeyboard(ctx) });
-    return;
-  }
   
   // Handle button editing
   if (broadcastState[userId] && broadcastState[userId].startsWith('editing_btn')) {
