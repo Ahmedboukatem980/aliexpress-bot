@@ -104,7 +104,7 @@ const mainKeyboard = (ctx) => {
 
 let buttonSettings = {
   btn1: { text: '🛍️ لمزيد من العروض اشترك في قناتنا من هنا', url: '' },
-  btn2: { text: '📦 بوت التتبع', url: 'https://t.me/trackbot' },
+  btn2: { text: '', url: '' },
   btn3: { text: '🔴 ملاحظة', url: '', isCallback: true }
 };
 
