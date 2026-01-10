@@ -284,11 +284,27 @@ async function trackPackage(trackingNumber) {
   }
   
   try {
+    // First, try to get existing tracking info
+    const getResponse = await axios.get(
+      `https://api.trackingmore.com/v4/trackings/get?tracking_numbers=${trackingNumber}`,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Trackingmore-Api-Key': TRACKING_API_KEY
+        },
+        timeout: 15000
+      }
+    );
+    
+    if (getResponse.data?.data?.[0]) {
+      return getResponse.data.data[0];
+    }
+
+    // If not found, create it
     const response = await axios.post(
       'https://api.trackingmore.com/v4/trackings/create',
       {
-        tracking_number: trackingNumber,
-        courier_code: 'cainiao'
+        tracking_number: trackingNumber
       },
       {
         headers: {
@@ -304,26 +320,6 @@ async function trackPackage(trackingNumber) {
     }
     return { error: 'لم يتم العثور على معلومات للشحنة' };
   } catch (err) {
-    if (err.response?.status === 4016 || err.response?.data?.meta?.code === 4016) {
-      try {
-        const getResponse = await axios.get(
-          `https://api.trackingmore.com/v4/trackings/get?tracking_numbers=${trackingNumber}`,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'Trackingmore-Api-Key': TRACKING_API_KEY
-            },
-            timeout: 15000
-          }
-        );
-        
-        if (getResponse.data?.data?.[0]) {
-          return getResponse.data.data[0];
-        }
-      } catch (e) {
-        console.log('Tracking get error:', e.message);
-      }
-    }
     console.log('Tracking error:', err.response?.data || err.message);
     return { error: 'حدث خطأ أثناء تتبع الشحنة. تأكد من صحة الرقم وحاول مرة أخرى.' };
   }
