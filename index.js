@@ -327,10 +327,8 @@ bot.on('text', async (ctx) => {
   const match = text.match(urlRegex);
   const targetUrl = match ? match[0] : text;
   
-  // Send the waiting image from local server as waiting indicator
-  const baseUrl = process.env.RENDER_EXTERNAL_URL || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '');
-  const waitingImg = baseUrl ? `${baseUrl}/public/waiting.png` : 'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif';
-  const sent = await safeSend(ctx, () => ctx.replyWithPhoto(waitingImg));
+  // Send the waiting message as indicator
+  const sent = await safeSend(ctx, () => ctx.reply('⏳ جاري البحث عن أفضل العروض 🔍'));
   
   try {
     const coinPi = await portaffFunction(cookies, targetUrl);
