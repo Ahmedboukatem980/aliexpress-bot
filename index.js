@@ -52,6 +52,14 @@ async function initDB() {
         END IF;
       END $$;
     `);
+    // Create table for tracking converted links
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS converted_links (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        converted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
     await loadButtonSettings();
   } catch (e) {
     console.log('DB init error:', e.message);
@@ -202,17 +210,46 @@ bot.hears('📊 الإحصائيات', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
   if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متصلة');
   try {
+    // Subscriber stats
     const total = await pool.query('SELECT COUNT(*) FROM users');
-    const today = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '1 day'");
-    const week = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '7 days'");
-    const month = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '30 days'");
+    const newToday = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '1 day'");
+    const newWeek = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '7 days'");
+    const newMonth = await pool.query("SELECT COUNT(*) FROM users WHERE joined_at >= NOW() - INTERVAL '30 days'");
+    
+    // Active users stats
+    const activeToday = await pool.query("SELECT COUNT(*) FROM users WHERE last_active >= NOW() - INTERVAL '1 day'");
+    const activeWeek = await pool.query("SELECT COUNT(*) FROM users WHERE last_active >= NOW() - INTERVAL '7 days'");
+    const activeMonth = await pool.query("SELECT COUNT(*) FROM users WHERE last_active >= NOW() - INTERVAL '30 days'");
+    
+    // Converted links stats
+    const linksToday = await pool.query("SELECT COUNT(*) FROM converted_links WHERE converted_at >= NOW() - INTERVAL '1 day'");
+    const linksWeek = await pool.query("SELECT COUNT(*) FROM converted_links WHERE converted_at >= NOW() - INTERVAL '7 days'");
+    const linksMonth = await pool.query("SELECT COUNT(*) FROM converted_links WHERE converted_at >= NOW() - INTERVAL '30 days'");
+    const linksTotal = await pool.query("SELECT COUNT(*) FROM converted_links");
+    
     const statsText = `📊 إحصائيات البوت:
-👥 إجمالي المشتركين: ${total.rows[0].count}
-📅 مشتركين اليوم: ${today.rows[0].count}
-🗓️ مشتركين الأسبوع: ${week.rows[0].count}
-🌙 مشتركين الشهر: ${month.rows[0].count}`;
+
+👥 المشتركين:
+├ الإجمالي: ${total.rows[0].count}
+├ جدد اليوم: ${newToday.rows[0].count}
+├ جدد الأسبوع: ${newWeek.rows[0].count}
+└ جدد الشهر: ${newMonth.rows[0].count}
+
+🟢 المستخدمين النشطين:
+├ اليوم: ${activeToday.rows[0].count}
+├ الأسبوع: ${activeWeek.rows[0].count}
+└ الشهر: ${activeMonth.rows[0].count}
+
+🔗 الروابط المحولة:
+├ الإجمالي: ${linksTotal.rows[0].count}
+├ اليوم: ${linksToday.rows[0].count}
+├ الأسبوع: ${linksWeek.rows[0].count}
+└ الشهر: ${linksMonth.rows[0].count}`;
     await ctx.reply(statsText);
-  } catch (e) { ctx.reply('حدث خطأ في جلب الإحصائيات'); }
+  } catch (e) { 
+    console.log('Stats error:', e.message);
+    ctx.reply('حدث خطأ في جلب الإحصائيات'); 
+  }
 });
 
 bot.hears('⚙️ إعدادات الأزرار', async (ctx) => {
@@ -361,6 +398,13 @@ bot.on('text', async (ctx) => {
         reply_markup: { inline_keyboard: inlineButtons }
       }
     ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
+    
+    // Track converted link
+    if (pool && dbConnected) {
+      try {
+        await pool.query('INSERT INTO converted_links (user_id) VALUES ($1)', [userId]);
+      } catch (e) {}
+    }
   } catch (e) { 
     if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
     ctx.reply('❗ حدث خطأ أثناء معالجة الرابط'); 
