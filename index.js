@@ -96,7 +96,7 @@ const mainKeyboard = (ctx) => {
   if (ctx.from.id === ADMIN_ID) {
     return Markup.keyboard([
       ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات'],
-      ['⚙️ إعدادات الأزرار']
+      ['⚙️ إعدادات الأزرار', '🖼️ تغيير صورة الانتظار']
     ]).resize();
   }
   return Markup.removeKeyboard();
@@ -248,6 +248,14 @@ bot.action('edit_btn3', async (ctx) => {
   await ctx.reply('✏️ أرسل النص والرابط للزر الثالث:\nالصيغة: النص | الرابط\n\nأو أرسل "منبثق" ليظهر كرسالة منبثقة:\nالنص | منبثق\n\nمثال:\n🔴 ملاحظة | منبثق');
 });
 
+bot.hears('🖼️ تغيير صورة الانتظار', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  broadcastState[ctx.from.id] = 'awaiting_waiting_image';
+  await ctx.reply('🖼️ من فضلك أرسل الصورة الجديدة التي تريد استخدامها كصورة انتظار:', {
+    reply_markup: { inline_keyboard: [[{ text: '❌ إلغاء', callback_data: 'cancel_broadcast' }]] }
+  });
+});
+
 let broadcastState = {};
 bot.hears('📢 إرسال رسالة', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
@@ -267,10 +275,34 @@ bot.action('note_info', async (ctx) => {
   await ctx.answerCbQuery('⚠️ غيّر البلد إلى كندا 🇨🇦 للحصول على أفضل الخصومات', { show_alert: true });
 });
 
+bot.on('photo', async (ctx) => {
+  const userId = ctx.from.id;
+  if (ctx.from.id === ADMIN_ID && broadcastState[userId] === 'awaiting_waiting_image') {
+    delete broadcastState[userId];
+    try {
+      const photo = ctx.message.photo[ctx.message.photo.length - 1];
+      const fileId = photo.file_id;
+      const fileUrl = await bot.telegram.getFileLink(fileId);
+      
+      const response = await require('axios').get(fileUrl.href, { responseType: 'arraybuffer' });
+      fs.writeFileSync(path.join(__dirname, 'public/waiting.png'), response.data);
+      
+      return ctx.reply('✅ تم تحديث صورة الانتظار بنجاح!');
+    } catch (e) {
+      console.error(e);
+      return ctx.reply('❌ حدث خطأ أثناء حفظ الصورة.');
+    }
+  }
+});
+
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
   
+  if (broadcastState[userId] === 'awaiting_waiting_image') {
+    return ctx.reply('⚠️ يرجى إرسال صورة (Image) وليس نصاً.');
+  }
+
   // Handle button editing
   if (broadcastState[userId] && broadcastState[userId].startsWith('editing_btn')) {
     const btnId = broadcastState[userId].replace('editing_', '');
