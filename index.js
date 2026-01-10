@@ -96,16 +96,19 @@ async function isUserSubscribed(userId) {
 }
 
 const mainKeyboard = (ctx) => {
-  if (ctx.from.id === ADMIN_ID) {
-    return Markup.keyboard([
-      ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات'],
-      ['⚙️ إعدادات الأزرار'],
-      ['📦 تتبع شحنتي']
-    ]).resize();
-  }
-  return Markup.keyboard([
+  const adminButtons = [
+    ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات'],
+    ['⚙️ إعدادات الأزرار'],
     ['📦 تتبع شحنتي']
-  ]).resize();
+  ];
+  const userButtons = [
+    ['📦 تتبع شحنتي']
+  ];
+  
+  if (ctx.from.id === ADMIN_ID) {
+    return Markup.keyboard(adminButtons).resize();
+  }
+  return Markup.keyboard(userButtons).resize();
 };
 
 let buttonSettings = {
