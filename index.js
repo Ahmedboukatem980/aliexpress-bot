@@ -321,6 +321,11 @@ bot.on('text', async (ctx) => {
   if (!text.includes('aliexpress.com')) {
     return ctx.reply('🚫 الرجاء إرسال رابط من AliExpress فقط.');
   }
+
+  // Extract the URL from the text to handle messages with text + link
+  const urlRegex = /(https?:\/\/[^\s]+aliexpress\.com[^\s]+)/gi;
+  const match = text.match(urlRegex);
+  const targetUrl = match ? match[0] : text;
   
   // Send the waiting image from local server as waiting indicator
   const baseUrl = process.env.RENDER_EXTERNAL_URL || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '');
@@ -328,7 +333,7 @@ bot.on('text', async (ctx) => {
   const sent = await safeSend(ctx, () => ctx.replyWithPhoto(waitingImg));
   
   try {
-    const coinPi = await portaffFunction(cookies, text);
+    const coinPi = await portaffFunction(cookies, targetUrl);
     if (!coinPi?.previews?.image_url) {
       if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
       return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
