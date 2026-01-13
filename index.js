@@ -33,34 +33,43 @@ if (process.env.DATABASE_URL) {
     });
 }
 
+let botSettings = {
+  subCheckEnabled: true
+};
+
+async function loadBotSettings() {
+  if (!pool || !dbConnected) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bot_settings (
+        id TEXT PRIMARY KEY,
+        val BOOLEAN DEFAULT TRUE
+      );
+    `);
+    const res = await pool.query('SELECT * FROM bot_settings WHERE id = \'sub_check\'');
+    if (res.rows.length > 0) {
+      botSettings.subCheckEnabled = res.rows[0].val;
+    }
+  } catch (e) { console.log('Error loading bot settings:', e.message); }
+}
+
+async function saveBotSetting(id, val) {
+  if (!pool || !dbConnected) return;
+  try {
+    await pool.query(
+      'INSERT INTO bot_settings (id, val) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET val = $2',
+      [id, val]
+    );
+    if (id === 'sub_check') botSettings.subCheckEnabled = val;
+  } catch (e) { console.log('Error saving bot setting:', e.message); }
+}
+
 async function initDB() {
   if (!pool) return;
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        user_id BIGINT PRIMARY KEY,
-        username TEXT,
-        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await pool.query(`
-      DO $$ 
-      BEGIN 
-        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='users' AND COLUMN_NAME='last_active') THEN
-          ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-        END IF;
-      END $$;
-    `);
-    // Create table for tracking converted links
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS converted_links (
-        id SERIAL PRIMARY KEY,
-        user_id BIGINT,
-        converted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+    // ... existing tables
     await loadButtonSettings();
+    await loadBotSettings();
   } catch (e) {
     console.log('DB init error:', e.message);
   }
@@ -255,12 +264,52 @@ bot.hears('📊 الإحصائيات', async (ctx) => {
 bot.hears('⚙️ إعدادات الأزرار', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
   
-  const currentSettings = `⚙️ الأزرار الحالية تحت المنشورات:\n\n1️⃣ ${buttonSettings.btn1.text}\n🔗 ${buttonSettings.btn1.url || Channel || 'رابط القناة'}\n\n2️⃣ ${buttonSettings.btn2.text}\n🔗 ${buttonSettings.btn2.url || 'غير محدد'}\n\n3️⃣ ${buttonSettings.btn3.text}\n${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗 ' + buttonSettings.btn3.url}`;
+  const currentSettings = `⚙️ إعدادات البوت والأزرار:
+
+1️⃣ ${buttonSettings.btn1.text}
+🔗 ${buttonSettings.btn1.url || Channel || 'رابط القناة'}
+
+2️⃣ ${buttonSettings.btn2.text}
+🔗 ${buttonSettings.btn2.url || 'غير محدد'}
+
+3️⃣ ${buttonSettings.btn3.text}
+${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗 ' + buttonSettings.btn3.url}
+
+📢 فحص الاشتراك: ${botSettings.subCheckEnabled ? '✅ مفعل' : '❌ معطل'}`;
   
   await ctx.reply(currentSettings, Markup.inlineKeyboard([
     [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
     [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
-    [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')]
+    [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')],
+    [Markup.button.callback(botSettings.subCheckEnabled ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')]
+  ]));
+});
+
+bot.action('toggle_sub_check', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  const newVal = !botSettings.subCheckEnabled;
+  await saveBotSetting('sub_check', newVal);
+  await ctx.answerCbQuery(`تم ${newVal ? 'تفعيل' : 'تعطيل'} فحص الاشتراك`);
+  
+  // Refresh settings message
+  const currentSettings = `⚙️ إعدادات البوت والأزرار:
+
+1️⃣ ${buttonSettings.btn1.text}
+🔗 ${buttonSettings.btn1.url || Channel || 'رابط القناة'}
+
+2️⃣ ${buttonSettings.btn2.text}
+🔗 ${buttonSettings.btn2.url || 'غير محدد'}
+
+3️⃣ ${buttonSettings.btn3.text}
+${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗 ' + buttonSettings.btn3.url}
+
+📢 فحص الاشتراك: ${newVal ? '✅ مفعل' : '❌ معطل'}`;
+
+  await ctx.editMessageText(currentSettings, Markup.inlineKeyboard([
+    [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
+    [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
+    [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')],
+    [Markup.button.callback(newVal ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')]
   ]));
 });
 
@@ -342,7 +391,7 @@ bot.on('text', async (ctx) => {
       return ctx.reply(`✅ تم الإرسال بنجاح إلى ${count} مستخدم.`);
     } catch (e) { return ctx.reply('حدث خطأ أثناء الإرسال'); }
   }
-  const subscribed = await isUserSubscribed(userId);
+  const subscribed = botSettings.subCheckEnabled ? await isUserSubscribed(userId) : true;
   if (!subscribed) {
     if (Channel && Channel.startsWith('https://')) {
       await safeSend(ctx, () =>
