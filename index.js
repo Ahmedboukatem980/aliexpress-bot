@@ -317,21 +317,21 @@ bot.action('edit_btn1', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
   await ctx.answerCbQuery();
   broadcastState[ctx.from.id] = 'editing_btn1';
-  await ctx.reply('✏️ أرسل النص والرابط للزر الأول:\nالصيغة: النص | الرابط\n\nمثال:\n🛍️ اشترك في قناتنا | https://t.me/yourchannel');
+  await ctx.reply('✏️ أرسل (النص | الرابط) للزر الأول:');
 });
 
 bot.action('edit_btn2', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
   await ctx.answerCbQuery();
   broadcastState[ctx.from.id] = 'editing_btn2';
-  await ctx.reply('✏️ أرسل النص والرابط للزر الثاني:\nالصيغة: النص | الرابط\n\nمثال:\n📦 بوت التتبع | https://t.me/trackbot');
+  await ctx.reply('✏️ أرسل (النص | الرابط) للزر الثاني:');
 });
 
 bot.action('edit_btn3', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
   await ctx.answerCbQuery();
   broadcastState[ctx.from.id] = 'editing_btn3';
-  await ctx.reply('✏️ أرسل النص والرابط للزر الثالث:\nالصيغة: النص | الرابط\n\nأو أرسل "منبثق" ليظهر كرسالة منبثقة:\nالنص | منبثق\n\nمثال:\n🔴 ملاحظة | منبثق');
+  await ctx.reply('✏️ أرسل (النص | الرابط) أو (النص | منبثق) للزر الثالث:');
 });
 
 let broadcastState = {};
@@ -350,7 +350,14 @@ bot.action('cancel_broadcast', async (ctx) => {
 });
 
 bot.action('note_info', async (ctx) => {
-  await ctx.answerCbQuery('⚠️ غيّر البلد إلى كندا 🇨🇦 للحصول على أفضل الخصومات', { show_alert: true });
+  const noteMessage = `🔴 ملاحظة:
+للحصول على أفضل الأسعار:
+📦 عروض الباندل: قم بوضع البلد الجزائر 🇩🇿
+💰 عروض العملات: قم بوضع البلد كندا 🇨🇦
+
+📌 ماتنساوش تثبيت البوت عندكم لمساعدتكم في الشراء بأرخص الأسعار`;
+  await ctx.answerCbQuery();
+  await ctx.reply(noteMessage);
 });
 
 bot.on('text', async (ctx) => {
