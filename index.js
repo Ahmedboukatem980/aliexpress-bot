@@ -356,8 +356,7 @@ bot.action('note_info', async (ctx) => {
 💰 عروض العملات: قم بوضع البلد كندا 🇨🇦
 
 📌 ماتنساوش تثبيت البوت عندكم لمساعدتكم في الشراء بأرخص الأسعار`;
-  await ctx.answerCbQuery();
-  await ctx.reply(noteMessage);
+  await ctx.answerCbQuery(noteMessage, { show_alert: true });
 });
 
 bot.on('text', async (ctx) => {
