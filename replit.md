@@ -1,32 +1,28 @@
 # AliExpress Telegram Bot
 
 ## Overview
-A Telegram bot that generates AliExpress affiliate links with discounts. Users send a product link, and the bot returns multiple discount links (coins, points, super deals, limited offers, bundle deals).
+A Telegram bot that converts AliExpress product links into affiliate links with discount offers. Built with Node.js, Express, and the Telegraf library. Uses PostgreSQL for data persistence.
 
-## Features
-- **Affiliate Link Generation**: Converts AliExpress links to affiliate links with various discount types
-- **Channel Subscription Check**: Users must subscribe to a channel before using the bot
-- **Admin Panel** (New): Admin-only control panel with:
-  - Broadcast messages to all subscribers
-  - View subscriber statistics (daily, weekly, monthly)
-  - View subscriber list
-- **PostgreSQL Database**: Tracks all users for statistics and broadcast functionality
+## Project Architecture
+- **index.js** - Main bot server with Express webhook, Telegram bot handlers, admin features (broadcast, stats, button settings), subscription checks, and cron jobs
+- **afflink.js** - Module for converting AliExpress URLs into affiliate links with coin/point/super/limit/bundle deals
+- **public/** - Static assets (waiting images)
+- **package.json** - Node.js dependencies
 
-## Environment Variables (Secrets)
-Required on Render:
-- `token` - Telegram bot token from BotFather
-- `cook` - AliExpress cookies for affiliate link generation
-- `Channel` - Channel URL for subscription check (e.g., https://t.me/yourchannel)
-- `ADMIN_ID` - Your Telegram user ID (numeric) to access admin panel
-- `DATABASE_URL` - PostgreSQL connection string
+## Key Features
+- Converts AliExpress links to affiliate links with multiple discount types (coins, points, super deals, limited offers, bundles)
+- Admin panel: broadcast messages, view subscribers, export CSV, statistics dashboard
+- Customizable inline buttons per message
+- Subscription check enforcement (toggleable)
+- Daily cron job to re-engage inactive users
+- Webhook-based bot with Express server on port 5000
 
-## Deployment
-This bot is deployed on Render. After pushing to GitHub:
-1. Render auto-deploys from the main branch
-2. Set environment variables in Render dashboard
+## Environment Variables
+- `token` - Telegram bot token
+- `cook` - Cookies for AliExpress requests
+- `Channel` - Telegram channel URL for subscription checks
+- `ADMIN_ID` - Telegram user ID for admin access
+- `DATABASE_URL` - PostgreSQL connection string (auto-provided by Replit)
 
-## Files
-- `index.js` - Main bot logic with admin panel
-- `afflink.js` - AliExpress affiliate link generation
-- `package.json` - Dependencies
-- `render.yaml` - Render deployment config
+## Recent Changes
+- 2026-02-08: Imported project to Replit, installed npm dependencies, verified server starts successfully with database connection
