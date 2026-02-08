@@ -483,8 +483,8 @@ bot.catch((err, ctx) => { console.error('Bot error:', err.message); });
 
 const PORT = process.env.PORT || 5000;
 function getWebhookUrl() {
-  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
   if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
   return null;
 }
 const WEBHOOK_URL = getWebhookUrl();
