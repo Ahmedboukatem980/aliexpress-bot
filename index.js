@@ -186,7 +186,8 @@ bot.hears('👥 المشتركين', async (ctx) => {
     });
     
     await ctx.reply(list, Markup.inlineKeyboard([
-      [Markup.button.callback('📥 تحميل القائمة كاملة (CSV)', 'download_users')]
+      [Markup.button.callback('📥 تحميل القائمة كاملة (CSV)', 'download_users')],
+      [Markup.button.callback('🗑️ مسح جميع المشتركين', 'confirm_delete_users')]
     ]));
   } catch (e) { ctx.reply('حدث خطأ في جلب القائمة'); }
 });
