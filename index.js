@@ -304,12 +304,14 @@ bot.action('toggle_sub_check', async (ctx) => {
 3️⃣ ${buttonSettings.btn3.text}
 ${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗 ' + buttonSettings.btn3.url}
 
-📢 فحص الاشتراك: ${newVal ? '✅ مفعل' : '❌ معطل'}`;
+📢 فحص الاشتراك: ${newVal ? '✅ مفعل' : '❌ معطل'}
+🍪 الكوكيز (Cook): ${process.env.cook ? '✅ مضافة' : '❌ غير مضافة'}`;
 
   await ctx.editMessageText(currentSettings, Markup.inlineKeyboard([
     [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
     [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
     [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')],
+    [Markup.button.callback('🍪 تعديل الكوكيز (Cook)', 'edit_cook')],
     [Markup.button.callback(newVal ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')]
   ]));
 });
