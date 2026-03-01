@@ -426,7 +426,7 @@ bot.on('text', async (ctx) => {
   const sent = await safeSend(ctx, () => ctx.reply('⏳ جاري البحث عن أفضل العروض 🔍'));
   
   try {
-    const coinPi = await portaffFunction(cookies, targetUrl);
+    const coinPi = await portaffFunction(process.env.cook, targetUrl);
     if (!coinPi?.previews?.image_url) {
       if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
       return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
