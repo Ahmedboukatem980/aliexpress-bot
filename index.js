@@ -186,8 +186,7 @@ bot.hears('👥 المشتركين', async (ctx) => {
     });
     
     await ctx.reply(list, Markup.inlineKeyboard([
-      [Markup.button.callback('📥 تحميل القائمة كاملة (CSV)', 'download_users')],
-      [Markup.button.callback('🗑️ مسح جميع المشتركين', 'confirm_delete_users')]
+      [Markup.button.callback('📥 تحميل القائمة كاملة (CSV)', 'download_users')]
     ]));
   } catch (e) { ctx.reply('حدث خطأ في جلب القائمة'); }
 });
@@ -304,14 +303,12 @@ bot.action('toggle_sub_check', async (ctx) => {
 3️⃣ ${buttonSettings.btn3.text}
 ${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗 ' + buttonSettings.btn3.url}
 
-📢 فحص الاشتراك: ${newVal ? '✅ مفعل' : '❌ معطل'}
-🍪 الكوكيز (Cook): ${process.env.cook ? '✅ مضافة' : '❌ غير مضافة'}`;
+📢 فحص الاشتراك: ${newVal ? '✅ مفعل' : '❌ معطل'}`;
 
   await ctx.editMessageText(currentSettings, Markup.inlineKeyboard([
     [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
     [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
     [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')],
-    [Markup.button.callback('🍪 تعديل الكوكيز (Cook)', 'edit_cook')],
     [Markup.button.callback(newVal ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')]
   ]));
 });
@@ -426,7 +423,7 @@ bot.on('text', async (ctx) => {
   const sent = await safeSend(ctx, () => ctx.reply('⏳ جاري البحث عن أفضل العروض 🔍'));
   
   try {
-    const coinPi = await portaffFunction(process.env.cook, targetUrl);
+    const coinPi = await portaffFunction(cookies, targetUrl);
     if (!coinPi?.previews?.image_url) {
       if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
       return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
@@ -486,8 +483,8 @@ bot.catch((err, ctx) => { console.error('Bot error:', err.message); });
 
 const PORT = process.env.PORT || 5000;
 function getWebhookUrl() {
-  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
   if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
+  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
   return null;
 }
 const WEBHOOK_URL = getWebhookUrl();
