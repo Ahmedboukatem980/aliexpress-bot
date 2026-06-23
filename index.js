@@ -273,10 +273,10 @@ bot.command(['start', 'help'], async (ctx) => {
     }
   }
 
-  const welcomeMessage = `🛍 *أهلاً بك في بوت Zed Store Online!*\n\n🤖 مساعدك الذكي للتسوّق من AliExpress\n\n✨ *ما يقدمه البوت:*\n💰 أفضل روابط خصم لأي منتج (عملات، Bundle، تخفيضات...)\n🤖 تحليل آراء الزبائن بالذكاء الاصطناعي\n❤️ حفظ المنتجات المفضلة\n🇩🇿 تنبيه المنتجات المقيّدة في الجمارك الجزائرية\n🎁 ادعُ أصدقاءك واجمع نقاط\n\n👇 *أرسل رابط أي منتج من AliExpress للبدء!*`;
+  const welcomeMessage = `مرحبا بك معنا، كل ما عليك الان هو إرسال لنا رابط المنتج التي تريد شرائه وسنقوم بتوفير لك أعلى نسبة خصم العملات 👌 أيضا عروض اخرى للمنتج بأسعار ممتازة،`;
 
   await safeSend(ctx, () =>
-    ctx.replyWithMarkdown(welcomeMessage, mainKeyboard(ctx))
+    ctx.reply(welcomeMessage, mainKeyboard(ctx))
   );
 });
 
@@ -336,11 +336,11 @@ bot.action(/open_saved_(\d+)/, async (ctx) => {
     const result = await pool.query('SELECT * FROM saved_products WHERE id = $1 AND user_id = $2', [ctx.match[1], ctx.from.id]);
     if (!result.rows[0]) return ctx.reply('المنتج غير موجود');
     const p = result.rows[0];
-    const text = `🛍 *${p.title || 'منتج محفوظ'}*\n\n🔗 رابط الافلييت:\n${p.aff_link}`;
+    const text = `🛍 ${p.title || 'منتج محفوظ'}\n\n🔗 رابط الافلييت:\n${p.aff_link}`;
     if (p.image_url) {
-      await ctx.replyWithPhoto({ url: p.image_url }, { caption: text, parse_mode: 'Markdown' });
+      await ctx.replyWithPhoto({ url: p.image_url }, { caption: text, parse_mode: 'HTML' });
     } else {
-      await ctx.replyWithMarkdown(text);
+      await ctx.reply(text);
     }
   } catch (e) {}
 });
@@ -677,8 +677,8 @@ bot.on('text', async (ctx) => {
       return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
     }
 
-    // Build caption
-    let caption = `🛍️ *${coinPi.previews.title || 'منتج AliExpress'}*\n\n`;
+    // Build caption (HTML mode — safe with AliExpress URLs containing underscores)
+    let caption = `🛍️ اسم المنتج: ${coinPi.previews.title || 'منتج AliExpress'}\n\n`;
 
     // ⭐ Product details
     if (coinPi.details) {
@@ -692,14 +692,14 @@ bot.on('text', async (ctx) => {
 
     // 🇩🇿 Algeria restriction warning
     if (coinPi.isAlgeriaRestricted) {
-      caption += `⚠️ *تنبيه جمارك الجزائر:*\n🚫 هذا المنتج قد يكون ممنوعاً أو يسبب مشاكل عند الاستيراد إلى الجزائر! تأكد قبل الشراء.\n\n`;
+      caption += `⚠️ تنبيه جمارك الجزائر:\n🚫 هذا المنتج قد يكون ممنوعاً أو يسبب مشاكل عند الاستيراد إلى الجزائر!\n\n`;
     }
 
-    caption += `🛒 رابط تخفيض العملات:\n${coinPi.aff.coin}\n\n`;
+    caption += `🛒 رابط تخفيض النقاط:\n${coinPi.aff.coin}\n\n`;
     caption += `🛒 رابط تخفيض النقاط القديم:\n${coinPi.aff.point}\n\n`;
     caption += `🛒 رابط السوبر ديلز:\n${coinPi.aff.super}\n\n`;
     caption += `🛒 رابط العرض المحدود:\n${coinPi.aff.limit}\n\n`;
-    caption += `🛒 رابط Bundle:\n${coinPi.aff.ther3}`;
+    caption += `🛒 رابط عرض bundle:\n${coinPi.aff.ther3}`;
 
     // Build inline buttons
     const inlineButtons = [];
@@ -729,7 +729,7 @@ bot.on('text', async (ctx) => {
 
     await ctx.replyWithPhoto(
       { url: coinPi.previews.image_url },
-      { caption, parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineButtons } }
+      { caption, parse_mode: 'HTML', reply_markup: { inline_keyboard: inlineButtons } }
     ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
 
     // Track converted link + give points for conversion
