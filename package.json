@@ -7,6 +7,7 @@
     "node": "20.x"
   },
   "scripts": {
+    "preinstall": "if [ \"$RENDER\" = \"true\" ]; then rm -rf node_modules/telegraf node_modules/.package-lock.json; fi",
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
