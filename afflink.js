@@ -95,8 +95,60 @@ function buildAliSign(params, appSecret) {
 async function fetchProductDetailsAPI(productId) {
     const appKey = process.env.ALI_APP_KEY;
     const appSecret = process.env.ALI_APP_SECRET;
-    if (!appKey || !appSecret) return null;
+    if (!appKey || !appSecret) {
+        console.log('No ALI_APP_KEY/ALI_APP_SECRET, skipping API');
+        return null;
+    }
 
+    // Try DS API first
+    try {
+        const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+        const params = {
+            app_key: appKey,
+            method: 'aliexpress.ds.product.get',
+            timestamp: ts,
+            format: 'json',
+            v: '2.0',
+            sign_method: 'hmac-sha256',
+            product_id: productId.toString(),
+            local_country: 'DZ',
+            local_language: 'en'
+        };
+        params.sign = buildAliSign(params, appSecret);
+
+        const res = await got.post('https://api-sg.aliexpress.com/sync', {
+            form: params,
+            responseType: 'json',
+            timeout: { request: 10000 }
+        });
+
+        const dsBody = res.body;
+        console.log('DS API response:', JSON.stringify(dsBody).substring(0, 400));
+        const dsResult = dsBody?.aliexpress_ds_product_get_response?.result;
+
+        if (dsResult) {
+            const tradeStr = dsResult.product_sale_info?.trade_count
+                || dsResult.trade_count
+                || dsResult.lastest_volume;
+            const orders = tradeStr ? parseInt(tradeStr).toLocaleString() : null;
+            const rating = dsResult.average_star
+                || dsResult.averageStar
+                || dsResult.ae_item_properties?.averageStar
+                || null;
+            const reviews = dsResult.evaluate_info?.total_valid_num
+                ? parseInt(dsResult.evaluate_info.total_valid_num).toLocaleString()
+                : null;
+            const storeName = dsResult.store_info?.store_name || dsResult.store_name || null;
+
+            if (orders || rating) {
+                return { orders, rating, reviews, storeFeedback: null, storeName };
+            }
+        }
+    } catch (err) {
+        console.error('❌ DS API error:', err.message);
+    }
+
+    // Try Affiliate API as fallback
     try {
         const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
         const params = {
@@ -117,68 +169,83 @@ async function fetchProductDetailsAPI(productId) {
             timeout: { request: 10000 }
         });
 
-        const result = res.body?.aliexpress_affiliate_product_detail_get_response?.resp_result?.result;
-        if (!result) {
-            console.log('AliExpress API no result:', JSON.stringify(res.body).substring(0, 200));
-            return null;
-        }
+        const affBody = res.body;
+        console.log('Affiliate API response:', JSON.stringify(affBody).substring(0, 400));
 
-        const evaluateRate = result.evaluate_rate ? parseFloat(result.evaluate_rate) : null;
-        const ratingStars = evaluateRate ? (evaluateRate / 20).toFixed(1) : null;
-        const orders = result.volume != null ? parseInt(result.volume).toLocaleString() : null;
+        // Handle different response structures
+        const respResult = affBody?.aliexpress_affiliate_product_detail_get_response?.resp_result;
+        const productData = respResult?.result?.products?.product?.[0]
+            || respResult?.result?.product_list?.product?.[0]
+            || respResult?.result;
+
+        if (!productData) return null;
+
+        const evaluateRate = productData.evaluate_rate
+            ? parseFloat(productData.evaluate_rate)
+            : null;
+        const volume = productData.volume ?? productData.sales_volume ?? null;
+        const orders = volume != null ? parseInt(volume).toLocaleString() : null;
+        const starRating = productData.star_rating
+            || (evaluateRate ? (evaluateRate / 20).toFixed(1) : null);
 
         return {
             orders,
-            rating: ratingStars,
+            rating: starRating,
             reviews: null,
             storeFeedback: evaluateRate ? `${evaluateRate.toFixed(1)}%` : null,
-            storeName: result.shop_name || null
+            storeName: productData.shop_name || productData.store_name || null
         };
     } catch (err) {
-        console.error('❌ AliExpress API error:', err.message);
+        console.error('❌ Affiliate API error:', err.message);
         return null;
     }
 }
 
-async function fetchProductDetailsScrape(productId) {
+async function fetchProductDetailsWithCookie(productId, cookie) {
     try {
         const res = await got(`https://www.aliexpress.com/item/${productId}.html`, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.5',
+                'Cookie': cookie ? `xman_t=${cookie}; aep_usuc_f=site=glo&c_tp=USD` : ''
             },
             https: { rejectUnauthorized: false },
             timeout: { request: 12000 }
         });
+
         const html = res.body;
         let orders = null, rating = null, reviews = null, storeFeedback = null, storeName = null;
 
-        const formattedTrade = html.match(/"formatTradeCount"\s*:\s*"([^"]+)"/);
-        if (formattedTrade) orders = formattedTrade[1];
+        const fmt = html.match(/"formatTradeCount"\s*:\s*"([^"]+)"/);
+        if (fmt) orders = fmt[1];
         else {
-            const trade = html.match(/"tradeCount"\s*:\s*(\d+)/);
-            if (trade) orders = parseInt(trade[1]).toLocaleString();
+            const tr = html.match(/"tradeCount"\s*:\s*(\d+)/);
+            if (tr) orders = parseInt(tr[1]).toLocaleString();
         }
-        const ratingM = html.match(/"averageStar"\s*:\s*"([^"]+)"/);
-        if (ratingM) rating = ratingM[1];
-        const reviewsM = html.match(/"totalValidNum"\s*:\s*(\d+)/);
-        if (reviewsM) reviews = parseInt(reviewsM[1]).toLocaleString();
-        const feedbackM = html.match(/"positiveRate"\s*:\s*"([^"]+)"/);
-        if (feedbackM) storeFeedback = feedbackM[1];
+        const ratM = html.match(/"averageStar"\s*:\s*"([^"]+)"/);
+        if (ratM) rating = ratM[1];
+        const revM = html.match(/"totalValidNum"\s*:\s*(\d+)/);
+        if (revM) reviews = parseInt(revM[1]).toLocaleString();
+        const feedM = html.match(/"positiveRate"\s*:\s*"([^"]+)"/);
+        if (feedM) storeFeedback = feedM[1];
         const storeM = html.match(/"storeName"\s*:\s*"([^"]+)"/);
         if (storeM) storeName = storeM[1];
 
+        console.log(`Details found - orders:${orders} rating:${rating} reviews:${reviews}`);
         return { orders, rating, reviews, storeFeedback, storeName };
     } catch (err) {
-        console.error("❌ Scrape details error:", err.message);
+        console.error("❌ Cookie scrape error:", err.message);
         return null;
     }
 }
 
-async function fetchProductDetails(productId) {
+async function fetchProductDetails(productId, cookie) {
+    // Try official API first (if keys available)
     const apiResult = await fetchProductDetailsAPI(productId);
     if (apiResult && (apiResult.orders || apiResult.rating)) return apiResult;
-    return fetchProductDetailsScrape(productId);
+    // Fallback: scrape with cookie authentication
+    return fetchProductDetailsWithCookie(productId, cookie);
 }
 
 async function portaffFunction(cookie, ids) {
@@ -236,7 +303,7 @@ async function portaffFunction(cookie, ids) {
 
     const [preview, details] = await Promise.all([
         fetchLinkPreview(productId),
-        fetchProductDetails(productId)
+        fetchProductDetails(productId, cookie)
     ]);
 
     result.previews = preview;

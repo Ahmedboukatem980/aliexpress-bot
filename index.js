@@ -551,6 +551,56 @@ cron.schedule('0 18 * * *', async () => {
   } catch (e) {}
 }, { timezone: "Africa/Algiers" });
 
+bot.command('testapi', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  const args = ctx.message.text.split(' ');
+  const productId = args[1] || '1005006104050503';
+  await ctx.reply(`🔍 اختبار API للمنتج: ${productId}...`);
+
+  const appKey = process.env.ALI_APP_KEY;
+  const appSecret = process.env.ALI_APP_SECRET;
+  const hasCook = !!cookies;
+
+  let report = `🔑 ALI_APP_KEY: ${appKey ? '✅ موجود' : '❌ غير موجود'}\n`;
+  report += `🔑 ALI_APP_SECRET: ${appSecret ? '✅ موجود' : '❌ غير موجود'}\n`;
+  report += `🍪 Cook: ${hasCook ? '✅ موجود' : '❌ غير موجود'}\n\n`;
+
+  if (appKey && appSecret) {
+    try {
+      const crypto = require('crypto');
+      const got = require('got');
+      const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      const params = {
+        app_key: appKey,
+        method: 'aliexpress.affiliate.product.detail.get',
+        timestamp: ts,
+        format: 'json',
+        v: '2.0',
+        sign_method: 'hmac-sha256',
+        product_id: productId.toString(),
+        tracking_id: 'default'
+      };
+      const sortedKeys = Object.keys(params).sort();
+      let signStr = appSecret;
+      for (const key of sortedKeys) signStr += key + params[key];
+      signStr += appSecret;
+      params.sign = crypto.createHmac('sha256', appSecret).update(signStr).digest('hex').toUpperCase();
+
+      const res = await got.post('https://api-sg.aliexpress.com/sync', {
+        form: params,
+        responseType: 'json',
+        timeout: { request: 10000 }
+      });
+
+      report += `📡 API Response:\n${JSON.stringify(res.body).substring(0, 800)}`;
+    } catch (e) {
+      report += `❌ API Error: ${e.message}`;
+    }
+  }
+
+  await ctx.reply(report.substring(0, 4000));
+});
+
 bot.catch((err, ctx) => { console.error('Bot error:', err.message); });
 
 const PORT = process.env.PORT || 5000;
