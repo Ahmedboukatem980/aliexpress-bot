@@ -4,6 +4,7 @@
   "description": "Telegram bot for AliExpress affiliate links",
   "main": "index.js",
   "scripts": {
+    "preinstall": "if [ \"$RENDER\" = \"true\" ]; then rm -rf node_modules; fi",
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
