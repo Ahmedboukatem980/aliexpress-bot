@@ -1,9 +1,31 @@
 const got = require("got");
-const { GoogleGenAI } = require("@google/genai");
 
-const ai = process.env.GEMINI_API_KEY
-  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-  : null;
+const GEMINI_MODEL = "gemini-2.0-flash";
+
+async function callGemini(prompt) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  try {
+    const res = await got.post(url, {
+      searchParams: { key: apiKey },
+      json: {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.6, maxOutputTokens: 400 }
+      },
+      responseType: "json",
+      timeout: { request: 20000 }
+    });
+
+    const text = res.body?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return text ? text.trim() : null;
+  } catch (err) {
+    const detail = err.response?.body ? JSON.stringify(err.response.body) : err.message;
+    console.error("❌ Gemini API error:", detail);
+    return null;
+  }
+}
 
 async function fetchReviews(productId, pageSize = 20) {
   const url = `https://feedback.aliexpress.com/pc/searchEvaluation.do`;
@@ -53,7 +75,7 @@ async function fetchReviews(productId, pageSize = 20) {
 }
 
 async function summarizeReviews(productId) {
-  if (!ai) return null;
+  if (!process.env.GEMINI_API_KEY) return null;
 
   const data = await fetchReviews(productId);
   if (!data) return null;
@@ -86,24 +108,10 @@ ${reviewsText ? `عينة من تعليقات المشترين:\n${reviewsText}`
 
 اجعل الرد قصيراً (لا يتجاوز 6 أسطر) وواضحاً وصادقاً. لا تخترع معلومات غير موجودة في البيانات.`;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: prompt,
-      config: {
-        temperature: 0.6,
-        maxOutputTokens: 400
-      }
-    });
+  const summary = await callGemini(prompt);
+  if (!summary) return null;
 
-    const summary = response.text?.trim();
-    if (!summary) return null;
-
-    return { summary, stats };
-  } catch (err) {
-    console.error("❌ Gemini summarize error:", err.message);
-    return null;
-  }
+  return { summary, stats };
 }
 
 module.exports = { fetchReviews, summarizeReviews };

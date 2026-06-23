@@ -13,7 +13,14 @@ The bot is deployed and runs in production on **Render** (auto-deploys from GitH
 **How to apply:** When adding any third-party API, wire it via a standard env-var API key, install the plain SDK, and gate features on the key's presence so they degrade gracefully when unset.
 
 # AI provider choice
-The AI reviews-summary feature uses **Google Gemini** (`@google/genai`, model `gemini-2.0-flash`, key `GEMINI_API_KEY`), NOT OpenAI. **Why:** OpenAI required paid billing (hit 429 quota-exceeded with no credits); Gemini's free tier solves this at zero cost for the user's volume. The earlier OpenAI implementation (`openai` pkg, `gpt-4o-mini`) was fully removed.
+The AI reviews-summary feature uses **Google Gemini** (model `gemini-2.0-flash`, key `GEMINI_API_KEY`), NOT OpenAI. **Why:** OpenAI required paid billing (hit 429 quota-exceeded with no credits); Gemini's free tier solves this at zero cost for the user's volume.
+
+Gemini is called via **direct REST** (`POST generativelanguage.googleapis.com/v1beta/models/<model>:generateContent?key=...`, body `{contents:[{parts:[{text}]}], generationConfig}`) using the existing `got` package — **NOT the `@google/genai` SDK**.
+
+# Render free-tier install constraint
+**Render's free tier (~512MB RAM) crashes `npm install` with `npm error Exit handler never called!` when the dependency tree grows too large.** Adding heavy SDKs (`openai`, `@google/genai`) triggered repeated build failures; the bot deployed fine only with its original lean dependency set.
+**Why:** the error is an npm OOM symptom, not a code bug — removing junk packages (`https`, `url` stubs) alone did NOT fix it; removing the heavy SDK did.
+**How to apply:** on this project, integrate third-party APIs via direct REST using the already-present `got` package instead of installing vendor SDKs. Keep the dependency footprint minimal.
 
 # DB connection
 Connection string comes from `DATABASE_URL || NEON_DATABASE_URL` (Neon Postgres). SSL is required for all non-localhost hosts (`{ rejectUnauthorized: false }`), disabled only for localhost.
