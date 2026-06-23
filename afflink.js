@@ -83,6 +83,48 @@ async function fetchLinkPreview(productId) {
     }
 }
 
+async function fetchProductDetails(productId) {
+    try {
+        const res = await got(`https://www.aliexpress.com/item/${productId}.html`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            },
+            https: { rejectUnauthorized: false },
+            timeout: { request: 12000 }
+        });
+
+        const html = res.body;
+
+        let orders = null, rating = null, reviews = null, storeFeedback = null, storeName = null;
+
+        const formattedTradeMatch = html.match(/"formatTradeCount"\s*:\s*"([^"]+)"/);
+        if (formattedTradeMatch) orders = formattedTradeMatch[1];
+        else {
+            const tradeMatch = html.match(/"tradeCount"\s*:\s*(\d+)/);
+            if (tradeMatch) orders = parseInt(tradeMatch[1]).toLocaleString();
+        }
+
+        const ratingMatch = html.match(/"averageStar"\s*:\s*"([^"]+)"/);
+        if (ratingMatch) rating = ratingMatch[1];
+
+        const reviewsMatch = html.match(/"totalValidNum"\s*:\s*(\d+)/);
+        if (reviewsMatch) reviews = parseInt(reviewsMatch[1]).toLocaleString();
+
+        const feedbackMatch = html.match(/"positiveRate"\s*:\s*"([^"]+)"/);
+        if (feedbackMatch) storeFeedback = feedbackMatch[1];
+
+        const storeMatch = html.match(/"storeName"\s*:\s*"([^"]+)"/);
+        if (storeMatch) storeName = storeMatch[1];
+
+        return { orders, rating, reviews, storeFeedback, storeName };
+    } catch (err) {
+        console.error("❌ Product details error:", err.message);
+        return null;
+    }
+}
+
 async function portaffFunction(cookie, ids) {
 
     const idObj = await idCatcher(ids);
@@ -136,7 +178,13 @@ async function portaffFunction(cookie, ids) {
         result.aff[pr.type] = pr.data;
     }
 
-    result.previews = await fetchLinkPreview(productId);
+    const [preview, details] = await Promise.all([
+        fetchLinkPreview(productId),
+        fetchProductDetails(productId)
+    ]);
+
+    result.previews = preview;
+    result.details = details;
 
     return result;
 }

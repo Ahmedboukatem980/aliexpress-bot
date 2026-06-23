@@ -461,10 +461,21 @@ bot.on('text', async (ctx) => {
       }
     }
 
+    const d = coinPi.details;
+    let detailsSection = '';
+    if (d) {
+      const ratingStars = d.rating ? '⭐'.repeat(Math.round(parseFloat(d.rating))) + ` ${d.rating}/5` : null;
+      const lines = [];
+      if (d.orders) lines.push(`📦 المبيعات: ${d.orders}`);
+      if (ratingStars) lines.push(`${ratingStars}${d.reviews ? ` (${d.reviews} تقييم)` : ''}`);
+      if (d.storeFeedback) lines.push(`🏪 ثقة المتجر: ${d.storeFeedback}${d.storeName ? ` — ${d.storeName}` : ''}`);
+      if (lines.length > 0) detailsSection = '\n\n' + lines.join('\n');
+    }
+
     await ctx.replyWithPhoto(
       { url: coinPi.previews.image_url },
       {
-        caption: `🛍️ اسم المنتج: ${coinPi.previews.title}\n\n🛒 رابط تخفيض النقاط:\n${coinPi.aff.coin}\n\n🛒 رابط تخفيض النقاط القديم:\n${coinPi.aff.point}\n\n🛒 رابط السوبر ديلز:\n${coinPi.aff.super}\n\n🛒 رابط العرض المحدود:\n${coinPi.aff.limit}\n\n🛒 رابط عرض bundle:\n${coinPi.aff.ther3}`,
+        caption: `🛍️ اسم المنتج: ${coinPi.previews.title}${detailsSection}\n\n🛒 رابط تخفيض النقاط:\n${coinPi.aff.coin}\n\n🛒 رابط تخفيض النقاط القديم:\n${coinPi.aff.point}\n\n🛒 رابط السوبر ديلز:\n${coinPi.aff.super}\n\n🛒 رابط العرض المحدود:\n${coinPi.aff.limit}\n\n🛒 رابط عرض bundle:\n${coinPi.aff.ther3}`,
         parse_mode: 'HTML',
         reply_markup: { inline_keyboard: inlineButtons }
       }
