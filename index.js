@@ -8,17 +8,19 @@ const fs = require('fs');
 const path = require('path');
 
 const bot = new Telegraf(process.env.token);
-const cookies = process.env.cook;
+let cookies = process.env.cook;
 const Channel = process.env.Channel || '';
 const ADMIN_ID = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
 
 let pool = null;
 let dbConnected = false;
 
-if (process.env.DATABASE_URL) {
-  const isLocalDB = process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
+const DB_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.NEON_DATABASE_URL_UNPOOLED || null;
+
+if (DB_URL) {
+  const isLocalDB = DB_URL.includes('localhost') || DB_URL.includes('127.0.0.1');
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: DB_URL,
     ssl: isLocalDB ? false : { rejectUnauthorized: false }
   });
   
@@ -47,9 +49,20 @@ async function loadBotSettings() {
         val BOOLEAN DEFAULT TRUE
       );
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bot_text_settings (
+        id TEXT PRIMARY KEY,
+        val TEXT
+      );
+    `);
     const res = await pool.query('SELECT * FROM bot_settings WHERE id = \'sub_check\'');
     if (res.rows.length > 0) {
       botSettings.subCheckEnabled = res.rows[0].val;
+    }
+    const cookRes = await pool.query('SELECT val FROM bot_text_settings WHERE id = \'cook\'');
+    if (cookRes.rows.length > 0 && cookRes.rows[0].val) {
+      cookies = cookRes.rows[0].val;
+      console.log('Cook loaded from database');
     }
   } catch (e) { console.log('Error loading bot settings:', e.message); }
 }
@@ -63,6 +76,16 @@ async function saveBotSetting(id, val) {
     );
     if (id === 'sub_check') botSettings.subCheckEnabled = val;
   } catch (e) { console.log('Error saving bot setting:', e.message); }
+}
+
+async function saveTextSetting(id, val) {
+  if (!pool || !dbConnected) return;
+  try {
+    await pool.query(
+      'INSERT INTO bot_text_settings (id, val) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET val = $2',
+      [id, val]
+    );
+  } catch (e) { console.log('Error saving text setting:', e.message); }
 }
 
 async function initDB() {
@@ -297,7 +320,8 @@ ${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗
     [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
     [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
     [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')],
-    [Markup.button.callback(botSettings.subCheckEnabled ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')]
+    [Markup.button.callback(botSettings.subCheckEnabled ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')],
+    [Markup.button.callback('🍪 تعديل الكوك (Cook)', 'edit_cook')]
   ]));
 });
 
@@ -307,7 +331,6 @@ bot.action('toggle_sub_check', async (ctx) => {
   await saveBotSetting('sub_check', newVal);
   await ctx.answerCbQuery(`تم ${newVal ? 'تفعيل' : 'تعطيل'} فحص الاشتراك`);
   
-  // Refresh settings message
   const currentSettings = `⚙️ إعدادات البوت والأزرار:
 
 1️⃣ ${buttonSettings.btn1.text}
@@ -325,8 +348,20 @@ ${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗
     [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
     [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
     [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')],
-    [Markup.button.callback(newVal ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')]
+    [Markup.button.callback(newVal ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')],
+    [Markup.button.callback('🍪 تعديل الكوك (Cook)', 'edit_cook')]
   ]));
+});
+
+bot.action('edit_cook', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
+  broadcastState[ctx.from.id] = 'editing_cook';
+  const cookPreview = cookies ? `(الحالي: ${cookies.substring(0, 20)}...)` : '(غير محدد)';
+  await ctx.reply(
+    `🍪 أرسل الكوك الجديد:\n${cookPreview}\n\n⚠️ أرسل الكوك كاملاً كما هو من المتصفح.`,
+    Markup.inlineKeyboard([[Markup.button.callback('❌ إلغاء', 'cancel_broadcast')]])
+  );
 });
 
 bot.action('edit_btn1', async (ctx) => {
@@ -379,6 +414,16 @@ bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
   
+  // Handle cook editing
+  if (broadcastState[userId] === 'editing_cook') {
+    delete broadcastState[userId];
+    const newCook = text.trim();
+    if (!newCook) return ctx.reply('❌ الكوك فارغ، يرجى إرسال الكوك كاملاً.');
+    cookies = newCook;
+    await saveTextSetting('cook', newCook);
+    return ctx.reply(`✅ تم حفظ الكوك بنجاح!\n\n🍪 الكوك الجديد: ${newCook.substring(0, 30)}...`, mainKeyboard(ctx));
+  }
+
   // Handle button editing
   if (broadcastState[userId] && broadcastState[userId].startsWith('editing_btn')) {
     const btnId = broadcastState[userId].replace('editing_', '');
