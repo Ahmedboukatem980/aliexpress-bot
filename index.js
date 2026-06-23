@@ -15,10 +15,12 @@ const ADMIN_ID = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
 let pool = null;
 let dbConnected = false;
 
-if (process.env.DATABASE_URL) {
-  const isLocalDB = process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
+const DB_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
+
+if (DB_URL) {
+  const isLocalDB = DB_URL.includes('localhost') || DB_URL.includes('127.0.0.1');
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: DB_URL,
     ssl: isLocalDB ? false : { rejectUnauthorized: false }
   });
   
