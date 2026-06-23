@@ -670,15 +670,16 @@ bot.on('text', async (ctx) => {
 
   const sent = await safeSend(ctx, () => ctx.reply('⏳ جاري البحث عن أفضل العروض 🔍'));
 
+  if (!cookies) {
+    if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
+    return ctx.reply('⚙️ البوت غير مُهيَّأ بعد. تواصل مع المشرف.');
+  }
+
   try {
     const coinPi = await portaffFunction(cookies, targetUrl);
-    if (!coinPi?.previews?.image_url) {
-      if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
-      return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
-    }
 
     // Build caption (HTML mode — safe with AliExpress URLs containing underscores)
-    let caption = `🛍️ اسم المنتج: ${coinPi.previews.title || 'منتج AliExpress'}\n\n`;
+    let caption = `🛍️ اسم المنتج: ${coinPi.previews?.title || 'منتج AliExpress'}\n\n`;
 
     // ⭐ Product details
     if (coinPi.details) {
@@ -727,10 +728,16 @@ bot.on('text', async (ctx) => {
       }
     }
 
-    await ctx.replyWithPhoto(
-      { url: coinPi.previews.image_url },
-      { caption, parse_mode: 'HTML', reply_markup: { inline_keyboard: inlineButtons } }
-    ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
+    const imageUrl = coinPi.previews?.image_url;
+    if (imageUrl) {
+      await ctx.replyWithPhoto(
+        { url: imageUrl },
+        { caption, parse_mode: 'HTML', reply_markup: { inline_keyboard: inlineButtons } }
+      ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
+    } else {
+      await ctx.reply(caption, { parse_mode: 'HTML', reply_markup: { inline_keyboard: inlineButtons } });
+      if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
+    }
 
     // Track converted link + give points for conversion
     if (pool && dbConnected) {
@@ -741,8 +748,13 @@ bot.on('text', async (ctx) => {
     }
   } catch (e) {
     if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
-    ctx.reply('❗ حدث خطأ أثناء معالجة الرابط');
-    console.error('Processing error:', e.message);
+    console.error('Processing error:', e.message, e.stack);
+    const userMsg = e.message?.includes('كوكيز') || e.message?.includes('cookie')
+      ? '⏳ انتهت صلاحية الكوكيز. سيتم تحديثها قريباً.'
+      : e.message?.includes('Product ID') || e.message?.includes('ID')
+        ? '🔗 تعذّر استخراج المنتج، تأكد أن الرابط صحيح من AliExpress.'
+        : '❗ حدث خطأ أثناء معالجة الرابط. حاول مرة أخرى.';
+    ctx.reply(userMsg);
   }
 });
 

@@ -195,15 +195,16 @@ async function portaffFunction(cookie, ids) {
         fetchProductDetails(productId)
     ]);
 
-    if (promoResults.every(pr => pr.data === null)) {
-        throw new Error("❌ فشل إنشاء جميع الروابط. قد تكون الكوكيز منتهية الصلاحية.");
+    const allFailed = promoResults.every(pr => pr.data === null);
+    if (allFailed) {
+        throw new Error("فشل إنشاء جميع الروابط. قد تكون الكوكيز منتهية الصلاحية.");
     }
 
     for (const pr of promoResults) {
-        result.aff[pr.type] = pr.data;
+        result.aff[pr.type] = pr.data || '—';
     }
 
-    result.previews = previewData;
+    result.previews = previewData || { title: '', image_url: null };
     result.details = detailsData;
     result.productId = productId;
     result.isAlgeriaRestricted = checkAlgeriaRestricted(previewData?.title);
