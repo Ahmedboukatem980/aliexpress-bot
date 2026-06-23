@@ -1,5 +1,6 @@
 const got = require("got");
 const { URL } = require("url");
+const crypto = require("crypto");
 
 async function getFinalRedirect(url) {
     try {
@@ -83,46 +84,101 @@ async function fetchLinkPreview(productId) {
     }
 }
 
-async function fetchProductDetails(productId) {
+function buildAliSign(params, appSecret) {
+    const sortedKeys = Object.keys(params).sort();
+    let signStr = appSecret;
+    for (const key of sortedKeys) signStr += key + params[key];
+    signStr += appSecret;
+    return crypto.createHmac('sha256', appSecret).update(signStr).digest('hex').toUpperCase();
+}
+
+async function fetchProductDetailsAPI(productId) {
+    const appKey = process.env.ALI_APP_KEY;
+    const appSecret = process.env.ALI_APP_SECRET;
+    if (!appKey || !appSecret) return null;
+
+    try {
+        const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+        const params = {
+            app_key: appKey,
+            method: 'aliexpress.affiliate.product.detail.get',
+            timestamp: ts,
+            format: 'json',
+            v: '2.0',
+            sign_method: 'hmac-sha256',
+            product_id: productId.toString(),
+            tracking_id: 'default'
+        };
+        params.sign = buildAliSign(params, appSecret);
+
+        const res = await got.post('https://api-sg.aliexpress.com/sync', {
+            form: params,
+            responseType: 'json',
+            timeout: { request: 10000 }
+        });
+
+        const result = res.body?.aliexpress_affiliate_product_detail_get_response?.resp_result?.result;
+        if (!result) {
+            console.log('AliExpress API no result:', JSON.stringify(res.body).substring(0, 200));
+            return null;
+        }
+
+        const evaluateRate = result.evaluate_rate ? parseFloat(result.evaluate_rate) : null;
+        const ratingStars = evaluateRate ? (evaluateRate / 20).toFixed(1) : null;
+        const orders = result.volume != null ? parseInt(result.volume).toLocaleString() : null;
+
+        return {
+            orders,
+            rating: ratingStars,
+            reviews: null,
+            storeFeedback: evaluateRate ? `${evaluateRate.toFixed(1)}%` : null,
+            storeName: result.shop_name || null
+        };
+    } catch (err) {
+        console.error('❌ AliExpress API error:', err.message);
+        return null;
+    }
+}
+
+async function fetchProductDetailsScrape(productId) {
     try {
         const res = await got(`https://www.aliexpress.com/item/${productId}.html`, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.5',
             },
             https: { rejectUnauthorized: false },
             timeout: { request: 12000 }
         });
-
         const html = res.body;
-
         let orders = null, rating = null, reviews = null, storeFeedback = null, storeName = null;
 
-        const formattedTradeMatch = html.match(/"formatTradeCount"\s*:\s*"([^"]+)"/);
-        if (formattedTradeMatch) orders = formattedTradeMatch[1];
+        const formattedTrade = html.match(/"formatTradeCount"\s*:\s*"([^"]+)"/);
+        if (formattedTrade) orders = formattedTrade[1];
         else {
-            const tradeMatch = html.match(/"tradeCount"\s*:\s*(\d+)/);
-            if (tradeMatch) orders = parseInt(tradeMatch[1]).toLocaleString();
+            const trade = html.match(/"tradeCount"\s*:\s*(\d+)/);
+            if (trade) orders = parseInt(trade[1]).toLocaleString();
         }
-
-        const ratingMatch = html.match(/"averageStar"\s*:\s*"([^"]+)"/);
-        if (ratingMatch) rating = ratingMatch[1];
-
-        const reviewsMatch = html.match(/"totalValidNum"\s*:\s*(\d+)/);
-        if (reviewsMatch) reviews = parseInt(reviewsMatch[1]).toLocaleString();
-
-        const feedbackMatch = html.match(/"positiveRate"\s*:\s*"([^"]+)"/);
-        if (feedbackMatch) storeFeedback = feedbackMatch[1];
-
-        const storeMatch = html.match(/"storeName"\s*:\s*"([^"]+)"/);
-        if (storeMatch) storeName = storeMatch[1];
+        const ratingM = html.match(/"averageStar"\s*:\s*"([^"]+)"/);
+        if (ratingM) rating = ratingM[1];
+        const reviewsM = html.match(/"totalValidNum"\s*:\s*(\d+)/);
+        if (reviewsM) reviews = parseInt(reviewsM[1]).toLocaleString();
+        const feedbackM = html.match(/"positiveRate"\s*:\s*"([^"]+)"/);
+        if (feedbackM) storeFeedback = feedbackM[1];
+        const storeM = html.match(/"storeName"\s*:\s*"([^"]+)"/);
+        if (storeM) storeName = storeM[1];
 
         return { orders, rating, reviews, storeFeedback, storeName };
     } catch (err) {
-        console.error("❌ Product details error:", err.message);
+        console.error("❌ Scrape details error:", err.message);
         return null;
     }
+}
+
+async function fetchProductDetails(productId) {
+    const apiResult = await fetchProductDetailsAPI(productId);
+    if (apiResult && (apiResult.orders || apiResult.rating)) return apiResult;
+    return fetchProductDetailsScrape(productId);
 }
 
 async function portaffFunction(cookie, ids) {
