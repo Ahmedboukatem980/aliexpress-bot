@@ -2,7 +2,7 @@ services:
   - type: web
     name: aliexpress-bot
     runtime: node
-    buildCommand: npm ci
+    buildCommand: npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
@@ -16,6 +16,4 @@ services:
       - key: ADMIN_ID
         sync: false
       - key: DATABASE_URL
-        sync: false
-      - key: GEMINI_API_KEY
         sync: false

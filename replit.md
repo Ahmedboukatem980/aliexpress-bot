@@ -19,7 +19,6 @@ Required on Render:
 - `Channel` - Channel URL for subscription check (e.g., https://t.me/yourchannel)
 - `ADMIN_ID` - Your Telegram user ID (numeric) to access admin panel
 - `DATABASE_URL` - PostgreSQL connection string
-- `GEMINI_API_KEY` - Google Gemini API key (free tier) for AI buyer-reviews summary. Get it at https://aistudio.google.com/app/apikey
 
 ## Deployment
 This bot is deployed on Render. After pushing to GitHub:

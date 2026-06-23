@@ -1,1 +1,0 @@
-- [Deployment & env split](deploy-env.md) — bot runs on Render (prod), Replit is dev/test; each needs its own copy of every secret, and code must avoid Replit-only connectors.

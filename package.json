@@ -3,11 +3,7 @@
   "version": "1.0.0",
   "description": "Telegram bot for AliExpress affiliate links",
   "main": "index.js",
-  "engines": {
-    "node": "20.x"
-  },
   "scripts": {
-    "preinstall": "if [ \"$RENDER\" = \"true\" ]; then rm -rf node_modules/telegraf node_modules/.package-lock.json; fi",
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -20,9 +16,11 @@
     "express": "^5.2.1",
     "follow-redirects": "^1.15.11",
     "got": "^11.8.6",
+    "https": "^1.0.0",
     "link-preview-js": "^3.2.0",
     "node-cron": "^4.2.1",
     "pg": "^8.17.2",
-    "telegraf": "^4.16.3"
+    "telegraf": "^4.16.3",
+    "url": "^0.11.4"
   }
 }

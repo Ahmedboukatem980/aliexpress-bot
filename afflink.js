@@ -53,19 +53,12 @@ async function idCatcher(input) {
         input = "https://" + input;
     }
 
-    let currentUrl = input;
-    let id = extractProductId(currentUrl);
+    let finalUrl = await getFinalRedirect(input);
+    finalUrl = await getFinalRedirect(finalUrl);
 
-    // Follow redirects step by step, stop as soon as a valid product ID is found.
-    // This avoids over-redirecting into .us / login pages where the ID is lost.
-    for (let i = 0; i < 6 && !id; i++) {
-        const next = await getFinalRedirect(currentUrl);
-        if (!next || next === currentUrl) break;
-        currentUrl = next;
-        id = extractProductId(currentUrl);
-    }
+    const id = extractProductId(finalUrl);
 
-    return { id, finalUrl: currentUrl };
+    return { id, finalUrl };
 }
 
 async function fetchLinkPreview(productId) {
@@ -144,7 +137,6 @@ async function portaffFunction(cookie, ids) {
     }
 
     result.previews = await fetchLinkPreview(productId);
-    result.productId = productId;
 
     return result;
 }
