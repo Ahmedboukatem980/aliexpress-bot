@@ -7,16 +7,70 @@ const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
 const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const bot = new Telegraf(process.env.token);
 const cookies = process.env.cook;
 const Channel = process.env.Channel || '';
 const ADMIN_ID = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
 
-// OpenAI setup (optional - only if key provided)
+// AI setup — OpenAI primary, Gemini fallback
 let openai = null;
+let geminiModel = null;
+
 if (process.env.OPENAI_API_KEY) {
   openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
+if (process.env.GEMINI_API_KEY) {
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+}
+
+const hasAI = openai || geminiModel;
+
+async function analyzeWithAI(prompt) {
+  // Try OpenAI first
+  if (openai) {
+    try {
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `أنت محلل متخصص في آراء المتسوقين من AliExpress. حلل التعليقات وقدم ملخصاً مختصراً باللغة العربية يتضمن:
+1. التقييم العام (ممتاز/جيد/متوسط/سيء)
+2. أبرز الإيجابيات (3 نقاط كحد أقصى)
+3. أبرز السلبيات (3 نقاط كحد أقصى)
+4. توصيتك النهائية
+استخدم الإيموجي لتحسين القراءة.`
+          },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 600
+      });
+      return { text: completion.choices[0].message.content, provider: 'OpenAI 🤖' };
+    } catch (e) {
+      console.log('OpenAI failed, trying Gemini:', e.message);
+    }
+  }
+  // Fallback to Gemini
+  if (geminiModel) {
+    try {
+      const fullPrompt = `أنت محلل متخصص في آراء المتسوقين من AliExpress. حلل التعليقات التالية وقدم ملخصاً مختصراً باللغة العربية يتضمن:
+1. التقييم العام (ممتاز/جيد/متوسط/سيء)
+2. أبرز الإيجابيات (3 نقاط كحد أقصى)
+3. أبرز السلبيات (3 نقاط كحد أقصى)
+4. توصيتك النهائية
+استخدم الإيموجي لتحسين القراءة.
+
+${prompt}`;
+      const result = await geminiModel.generateContent(fullPrompt);
+      return { text: result.response.text(), provider: 'Gemini 🟣' };
+    } catch (e) {
+      console.log('Gemini also failed:', e.message);
+    }
+  }
+  return null;
 }
 
 let pool = null;
@@ -327,8 +381,8 @@ bot.action(/save_product_(.+)/, async (ctx) => {
 bot.action(/analyze_reviews_(.+)/, async (ctx) => {
   await ctx.answerCbQuery('⏳ جاري التحليل...');
 
-  if (!openai) {
-    return ctx.reply('⚠️ ميزة الذكاء الاصطناعي غير مفعلة. يرجى إضافة OPENAI_API_KEY في الإعدادات.');
+  if (!hasAI) {
+    return ctx.reply('⚠️ ميزة الذكاء الاصطناعي غير مفعلة.\nأضف OPENAI_API_KEY أو GEMINI_API_KEY في إعدادات Render.');
   }
 
   const productId = ctx.match[1];
@@ -342,29 +396,17 @@ bot.action(/analyze_reviews_(.+)/, async (ctx) => {
       return ctx.reply('⚠️ لم أتمكن من جلب تعليقات هذا المنتج. جرب منتجاً آخر.');
     }
 
-    const reviewsText = reviews.join('\n---\n');
+    const prompt = `تعليقات المنتج:\n${reviews.join('\n---\n')}`;
+    const result = await analyzeWithAI(prompt);
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `أنت محلل متخصص في آراء المتسوقين من AliExpress. حلل التعليقات التالية وقدم ملخصاً مختصراً وموضوعياً باللغة العربية. اذكر:
-1. التقييم العام (ممتاز/جيد/متوسط/سيء)
-2. أبرز الإيجابيات (3 نقاط كحد أقصى)
-3. أبرز السلبيات (3 نقاط كحد أقصى)  
-4. توصيتك النهائية (هل تنصح بالشراء أم لا)
-استخدم الإيموجي لتحسين القراءة.`
-        },
-        { role: 'user', content: `تعليقات المنتج:\n${reviewsText}` }
-      ],
-      max_tokens: 600
-    });
-
-    const analysis = completion.choices[0].message.content;
     if (loadingMsg) ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
 
-    await ctx.reply(`🤖 *تحليل آراء الزبائن بالذكاء الاصطناعي*\n\n${analysis}`, { parse_mode: 'Markdown' });
+    if (!result) return ctx.reply('❗ حدث خطأ في جميع خدمات الذكاء الاصطناعي. حاول مرة أخرى.');
+
+    await ctx.reply(
+      `🤖 *تحليل آراء الزبائن* — ${result.provider}\n\n${result.text}`,
+      { parse_mode: 'Markdown' }
+    );
   } catch (e) {
     if (loadingMsg) ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
     ctx.reply('❗ حدث خطأ أثناء تحليل الآراء');
@@ -663,7 +705,7 @@ bot.on('text', async (ctx) => {
     const actionButtons = [
       { text: '❤️ حفظ المنتج', callback_data: `save_product_${coinPi.productId}` }
     ];
-    if (openai) {
+    if (hasAI) {
       actionButtons.push({ text: '🤖 تحليل الآراء', callback_data: `analyze_reviews_${coinPi.productId}` });
     }
     inlineButtons.push(actionButtons);
