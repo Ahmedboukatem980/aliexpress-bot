@@ -2,6 +2,7 @@ const { Telegraf, Markup } = require('telegraf');
 const express = require('express');
 const app = express();
 const { portaffFunction } = require('./afflink');
+const { summarizeReviews } = require('./reviews');
 const { Pool } = require('pg');
 const cron = require('node-cron');
 const fs = require('fs');
@@ -422,6 +423,31 @@ bot.action('note_info', async (ctx) => {
   await ctx.answerCbQuery(noteMessage, { show_alert: true });
 });
 
+bot.action(/^rev_(\d+)$/, async (ctx) => {
+  const productId = ctx.match[1];
+  await ctx.answerCbQuery('⏳ جاري تحليل آراء المشترين...');
+  const loading = await safeSend(ctx, () => ctx.reply('🤖 جاري قراءة وتلخيص تعليقات المشترين، انتظر قليلاً...'));
+  try {
+    const result = await summarizeReviews(productId);
+    if (loading) ctx.deleteMessage(loading.message_id).catch(() => {});
+
+    if (!result) {
+      return safeSend(ctx, () => ctx.reply('❗ تعذّر جلب آراء المشترين حالياً، حاول لاحقاً.'));
+    }
+    if (result.noReviews) {
+      return safeSend(ctx, () => ctx.reply('ℹ️ لا توجد تقييمات كافية لهذا المنتج بعد.'));
+    }
+
+    const stats = result.stats;
+    const header = `⭐ ملخص آراء المشترين\n📊 ${stats.avgStar}/5 من ${stats.total} تقييم (${stats.positiveRate}% إيجابي)\n\n`;
+    return safeSend(ctx, () => ctx.reply(header + result.summary));
+  } catch (e) {
+    if (loading) ctx.deleteMessage(loading.message_id).catch(() => {});
+    console.error('Reviews summary error:', e.message);
+    return safeSend(ctx, () => ctx.reply('❗ حدث خطأ أثناء تلخيص الآراء.'));
+  }
+});
+
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
@@ -522,6 +548,11 @@ bot.on('text', async (ctx) => {
       } else if (buttonSettings.btn3.url) {
         inlineButtons.push([{ text: buttonSettings.btn3.text, url: buttonSettings.btn3.url }]);
       }
+    }
+
+    // Reviews summary button (AI) — only when OpenAI is configured and we have a product ID
+    if (process.env.OPENAI_API_KEY && coinPi.productId) {
+      inlineButtons.unshift([{ text: '⭐ ملخص آراء المشترين', callback_data: `rev_${coinPi.productId}` }]);
     }
 
     await ctx.replyWithPhoto(
