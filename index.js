@@ -16,9 +16,10 @@ let pool = null;
 let dbConnected = false;
 
 if (process.env.DATABASE_URL) {
+  const isLocalDB = process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL.includes('render.com') || process.env.DATABASE_URL.includes('neon.tech') ? { rejectUnauthorized: false } : false
+    ssl: isLocalDB ? false : { rejectUnauthorized: false }
   });
   
   pool.query('SELECT 1')
@@ -67,9 +68,24 @@ async function saveBotSetting(id, val) {
 async function initDB() {
   if (!pool) return;
   try {
-    // ... existing tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        username TEXT,
+        joined_at TIMESTAMPTZ DEFAULT NOW(),
+        last_active TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS converted_links (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        converted_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
     await loadButtonSettings();
     await loadBotSettings();
+    console.log('Database tables ready');
   } catch (e) {
     console.log('DB init error:', e.message);
   }
