@@ -27,28 +27,37 @@ async function callGemini(prompt) {
   }
 }
 
-async function fetchReviews(productId, pageSize = 20) {
+const PAGES_TO_FETCH = 3;
+const PAGE_SIZE = 20;
+
+async function fetchOnePage(productId, page) {
   const url = `https://feedback.aliexpress.com/pc/searchEvaluation.do`;
+  const res = await got(url, {
+    searchParams: {
+      productId,
+      lang: "en_US",
+      country: "US",
+      page,
+      pageSize: PAGE_SIZE,
+      filter: "all",
+      sort: "complex_default"
+    },
+    responseType: "json",
+    timeout: { request: 15000 }
+  });
+  return res.body?.data || {};
+}
+
+async function fetchReviews(productId) {
   try {
-    const res = await got(url, {
-      searchParams: {
-        productId,
-        lang: "en_US",
-        country: "US",
-        page: 1,
-        pageSize,
-        filter: "all",
-        sort: "complex_default"
-      },
-      responseType: "json",
-      timeout: { request: 15000 }
-    });
+    const pages = await Promise.all(
+      Array.from({ length: PAGES_TO_FETCH }, (_, i) => fetchOnePage(productId, i + 1))
+    );
 
-    const data = res.body?.data || {};
-    const list = data.evaViewList || [];
-    const stat = data.productEvaluationStatistic || {};
+    const stat = pages[0]?.productEvaluationStatistic || {};
 
-    const reviews = list
+    const reviews = pages
+      .flatMap(data => data.evaViewList || [])
       .map(r => ({
         country: r.buyerCountry || "",
         stars: typeof r.buyerEval === "number" ? Math.round(r.buyerEval / 20) : null,
@@ -89,7 +98,7 @@ async function summarizeReviews(productId) {
   const reviewsWithText = reviews.filter(r => r.text);
 
   const reviewsText = reviewsWithText
-    .slice(0, 15)
+    .slice(0, 40)
     .map(r => `- (${r.stars || "?"}⭐ ${r.country}) ${r.text}`)
     .join("\n");
 
