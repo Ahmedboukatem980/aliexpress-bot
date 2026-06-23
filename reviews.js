@@ -1,8 +1,8 @@
 const got = require("got");
-const OpenAI = require("openai");
+const { GoogleGenAI } = require("@google/genai");
 
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const ai = process.env.GEMINI_API_KEY
+  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
   : null;
 
 async function fetchReviews(productId, pageSize = 20) {
@@ -53,7 +53,7 @@ async function fetchReviews(productId, pageSize = 20) {
 }
 
 async function summarizeReviews(productId) {
-  if (!openai) return null;
+  if (!ai) return null;
 
   const data = await fetchReviews(productId);
   if (!data) return null;
@@ -87,19 +87,21 @@ ${reviewsText ? `عينة من تعليقات المشترين:\n${reviewsText}`
 اجعل الرد قصيراً (لا يتجاوز 6 أسطر) وواضحاً وصادقاً. لا تخترع معلومات غير موجودة في البيانات.`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.6,
-      max_tokens: 350
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+      config: {
+        temperature: 0.6,
+        maxOutputTokens: 400
+      }
     });
 
-    const summary = completion.choices?.[0]?.message?.content?.trim();
+    const summary = response.text?.trim();
     if (!summary) return null;
 
     return { summary, stats };
   } catch (err) {
-    console.error("❌ OpenAI summarize error:", err.message);
+    console.error("❌ Gemini summarize error:", err.message);
     return null;
   }
 }

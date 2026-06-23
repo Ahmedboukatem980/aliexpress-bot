@@ -550,8 +550,8 @@ bot.on('text', async (ctx) => {
       }
     }
 
-    // Reviews summary button (AI) — only when OpenAI is configured and we have a product ID
-    if (process.env.OPENAI_API_KEY && coinPi.productId) {
+    // Reviews summary button (AI) — only when Gemini is configured and we have a product ID
+    if (process.env.GEMINI_API_KEY && coinPi.productId) {
       inlineButtons.unshift([{ text: '⭐ ملخص آراء المشترين', callback_data: `rev_${coinPi.productId}` }]);
     }
 
