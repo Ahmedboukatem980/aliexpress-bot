@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const bot = new Telegraf(process.env.token);
-const cookies = process.env.cook;
+let cookies = process.env.cook;
 const Channel = process.env.Channel || '';
 const ADMIN_ID = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
 
@@ -67,6 +67,35 @@ async function saveBotSetting(id, val) {
   } catch (e) { console.log('Error saving bot setting:', e.message); }
 }
 
+async function loadCookSetting() {
+  if (!pool || !dbConnected) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bot_config (
+        id TEXT PRIMARY KEY,
+        val TEXT
+      );
+    `);
+    const res = await pool.query('SELECT val FROM bot_config WHERE id = \'cook\'');
+    if (res.rows.length > 0 && res.rows[0].val) {
+      cookies = res.rows[0].val;
+      console.log('Cookies loaded from database');
+    }
+  } catch (e) { console.log('Error loading cook setting:', e.message); }
+}
+
+async function saveCookSetting(val) {
+  if (!pool || !dbConnected) return false;
+  try {
+    await pool.query(
+      'INSERT INTO bot_config (id, val) VALUES (\'cook\', $1) ON CONFLICT (id) DO UPDATE SET val = $1',
+      [val]
+    );
+    cookies = val;
+    return true;
+  } catch (e) { console.log('Error saving cook setting:', e.message); return false; }
+}
+
 async function initDB() {
   if (!pool) return;
   try {
@@ -87,6 +116,7 @@ async function initDB() {
     `);
     await loadButtonSettings();
     await loadBotSettings();
+    await loadCookSetting();
     console.log('Database tables ready');
   } catch (e) {
     console.log('DB init error:', e.message);
@@ -293,12 +323,15 @@ bot.hears('⚙️ إعدادات الأزرار', async (ctx) => {
 3️⃣ ${buttonSettings.btn3.text}
 ${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗 ' + buttonSettings.btn3.url}
 
-📢 فحص الاشتراك: ${botSettings.subCheckEnabled ? '✅ مفعل' : '❌ معطل'}`;
+📢 فحص الاشتراك: ${botSettings.subCheckEnabled ? '✅ مفعل' : '❌ معطل'}
+
+🍪 الكوكيز: ${cookies ? '✅ مضبوطة' : '❌ غير مضبوطة'}`;
   
   await ctx.reply(currentSettings, Markup.inlineKeyboard([
     [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
     [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
     [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')],
+    [Markup.button.callback('🍪 تعديل الكوكيز (cook)', 'edit_cook')],
     [Markup.button.callback(botSettings.subCheckEnabled ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')]
   ]));
 });
@@ -321,12 +354,15 @@ bot.action('toggle_sub_check', async (ctx) => {
 3️⃣ ${buttonSettings.btn3.text}
 ${buttonSettings.btn3.isCallback ? '📌 زر منبثق (ملاحظة)' : '🔗 ' + buttonSettings.btn3.url}
 
-📢 فحص الاشتراك: ${newVal ? '✅ مفعل' : '❌ معطل'}`;
+📢 فحص الاشتراك: ${newVal ? '✅ مفعل' : '❌ معطل'}
+
+🍪 الكوكيز: ${cookies ? '✅ مضبوطة' : '❌ غير مضبوطة'}`;
 
   await ctx.editMessageText(currentSettings, Markup.inlineKeyboard([
     [Markup.button.callback('✏️ تعديل الزر 1', 'edit_btn1')],
     [Markup.button.callback('✏️ تعديل الزر 2', 'edit_btn2')],
     [Markup.button.callback('✏️ تعديل الزر 3', 'edit_btn3')],
+    [Markup.button.callback('🍪 تعديل الكوكيز (cook)', 'edit_cook')],
     [Markup.button.callback(newVal ? '❌ تعطيل فحص الاشتراك' : '✅ تفعيل فحص الاشتراك', 'toggle_sub_check')]
   ]));
 });
@@ -350,6 +386,15 @@ bot.action('edit_btn3', async (ctx) => {
   await ctx.answerCbQuery();
   broadcastState[ctx.from.id] = 'editing_btn3';
   await ctx.reply('✏️ أرسل (النص | الرابط) أو (النص | منبثق) للزر الثالث:');
+});
+
+bot.action('edit_cook', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('غير مصرح');
+  await ctx.answerCbQuery();
+  broadcastState[ctx.from.id] = 'editing_cook';
+  await ctx.reply('🍪 أرسل قيمة الكوكيز الجديدة (cook) من AliExpress:\n\nℹ️ سيتم حفظها في قاعدة البيانات واستخدامها فوراً لتوليد الروابط.', {
+    reply_markup: { inline_keyboard: [[{ text: '❌ إلغاء', callback_data: 'cancel_broadcast' }]] }
+  });
 });
 
 let broadcastState = {};
@@ -397,6 +442,22 @@ bot.on('text', async (ctx) => {
     
     await saveButtonSetting(btnId, btnText, isCallback ? '' : btnUrl, isCallback);
     return ctx.reply(`✅ تم حفظ الزر بنجاح!\n\n${btnText}\n${isCallback ? '📌 زر منبثق' : '🔗 ' + btnUrl}`, mainKeyboard(ctx));
+  }
+  
+  // Handle cook editing
+  if (broadcastState[userId] === 'editing_cook') {
+    delete broadcastState[userId];
+    const newCook = text.trim();
+    if (!newCook) {
+      return ctx.reply('❌ قيمة الكوكيز فارغة. حاول مرة أخرى.', mainKeyboard(ctx));
+    }
+    const saved = await saveCookSetting(newCook);
+    if (saved) {
+      return ctx.reply('✅ تم تحديث الكوكيز بنجاح وحفظها في قاعدة البيانات!', mainKeyboard(ctx));
+    } else {
+      cookies = newCook;
+      return ctx.reply('⚠️ تم تحديث الكوكيز مؤقتاً (قاعدة البيانات غير متصلة، ستُفقد عند إعادة التشغيل).', mainKeyboard(ctx));
+    }
   }
   
   if (broadcastState[userId] === 'awaiting_message') {
