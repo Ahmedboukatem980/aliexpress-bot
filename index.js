@@ -77,9 +77,10 @@ let pool = null;
 let dbConnected = false;
 
 if (process.env.DATABASE_URL) {
+  const sslRequired = ['render.com', 'neon.tech', 'supabase', 'amazonaws', 'railway'].some(h => process.env.DATABASE_URL.includes(h));
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL.includes('render.com') || process.env.DATABASE_URL.includes('neon.tech') ? { rejectUnauthorized: false } : false
+    ssl: sslRequired ? { rejectUnauthorized: false } : undefined
   });
   pool.query('SELECT 1')
     .then(() => { dbConnected = true; console.log('Database connected'); initDB(); })
@@ -107,45 +108,53 @@ async function saveBotSetting(id, val) {
 
 async function initDB() {
   if (!pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        user_id BIGINT PRIMARY KEY,
-        username TEXT,
-        joined_at TIMESTAMPTZ DEFAULT NOW(),
-        last_active TIMESTAMPTZ DEFAULT NOW(),
-        ref_by BIGINT DEFAULT NULL
-      );
-      CREATE TABLE IF NOT EXISTS converted_links (
-        id SERIAL PRIMARY KEY,
-        user_id BIGINT,
-        converted_at TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS saved_products (
-        id SERIAL PRIMARY KEY,
-        user_id BIGINT NOT NULL,
-        product_id TEXT NOT NULL,
-        title TEXT,
-        image_url TEXT,
-        aff_link TEXT,
-        saved_at TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS referrals (
-        id SERIAL PRIMARY KEY,
-        referrer_id BIGINT NOT NULL,
-        referred_id BIGINT NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(referred_id)
-      );
-      CREATE TABLE IF NOT EXISTS user_points (
-        user_id BIGINT PRIMARY KEY,
-        points INT DEFAULT 0,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-    await loadButtonSettings();
-    await loadBotSettings();
-  } catch (e) { console.log('DB init error:', e.message); }
+
+  const tables = [
+    `CREATE TABLE IF NOT EXISTS users (
+      user_id BIGINT PRIMARY KEY,
+      username TEXT,
+      joined_at TIMESTAMPTZ DEFAULT NOW(),
+      last_active TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_by BIGINT DEFAULT NULL`,
+    `CREATE TABLE IF NOT EXISTS converted_links (
+      id SERIAL PRIMARY KEY,
+      user_id BIGINT,
+      converted_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS saved_products (
+      id SERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      product_id TEXT NOT NULL,
+      title TEXT,
+      image_url TEXT,
+      aff_link TEXT,
+      saved_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS referrals (
+      id SERIAL PRIMARY KEY,
+      referrer_id BIGINT NOT NULL,
+      referred_id BIGINT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(referred_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS user_points (
+      user_id BIGINT PRIMARY KEY,
+      points INT DEFAULT 0,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`
+  ];
+
+  for (const sql of tables) {
+    try {
+      await pool.query(sql);
+    } catch (e) {
+      console.log('DB table error:', e.message);
+    }
+  }
+
+  await loadButtonSettings();
+  await loadBotSettings();
 }
 
 // ─── Add points helper ────────────────────────────────────────────────────────
