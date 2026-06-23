@@ -53,12 +53,19 @@ async function idCatcher(input) {
         input = "https://" + input;
     }
 
-    let finalUrl = await getFinalRedirect(input);
-    finalUrl = await getFinalRedirect(finalUrl);
+    let currentUrl = input;
+    let id = extractProductId(currentUrl);
 
-    const id = extractProductId(finalUrl);
+    // Follow redirects step by step, stop as soon as a valid product ID is found.
+    // This avoids over-redirecting into .us / login pages where the ID is lost.
+    for (let i = 0; i < 6 && !id; i++) {
+        const next = await getFinalRedirect(currentUrl);
+        if (!next || next === currentUrl) break;
+        currentUrl = next;
+        id = extractProductId(currentUrl);
+    }
 
-    return { id, finalUrl };
+    return { id, finalUrl: currentUrl };
 }
 
 async function fetchLinkPreview(productId) {

@@ -541,7 +541,12 @@ bot.on('text', async (ctx) => {
     }
   } catch (e) { 
     if (sent) ctx.deleteMessage(sent.message_id).catch(() => {});
-    ctx.reply('❗ حدث خطأ أثناء معالجة الرابط'); 
+    console.error('Link processing error:', e.message);
+    if (ctx.from.id === ADMIN_ID) {
+      ctx.reply(`❗ حدث خطأ أثناء معالجة الرابط\n\n🔧 التفاصيل (للأدمن فقط):\n${e.message}`);
+    } else {
+      ctx.reply('❗ حدث خطأ أثناء معالجة الرابط، حاول مرة أخرى لاحقاً.');
+    }
   }
 });
 
