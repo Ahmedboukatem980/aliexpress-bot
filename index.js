@@ -1,7 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const express = require('express');
 const app = express();
-const { portaffFunction } = require('./afflink');
+const { portaffFunction, idCatcher } = require('./afflink');
 const { Pool } = require('pg');
 const cron = require('node-cron');
 const fs = require('fs');
@@ -415,7 +415,13 @@ bot.command('testapi', async (ctx) => {
   const crypto = require('crypto');
   const got = require('got');
   const args = ctx.message.text.split(' ');
-  const productId = args[1] || '1005006104050503';
+  let productId = args[1] || '1005006104050503';
+
+  // Accept a full URL too — extract the product ID
+  if (!/^\d+$/.test(productId)) {
+    const idObj = await idCatcher(productId).catch(() => null);
+    if (idObj?.id) productId = idObj.id;
+  }
   await ctx.reply(`🔍 اختبار API للمنتج: ${productId}...`);
 
   const appKey = process.env.ALI_APP_KEY;
@@ -425,36 +431,48 @@ bot.command('testapi', async (ctx) => {
     return ctx.reply(`❌ المفاتيح ناقصة\nALI_APP_KEY: ${appKey ? '✅' : '❌'}\nALI_APP_SECRET: ${appSecret ? '✅' : '❌'}`);
   }
 
-  const params = {
-    app_key: appKey,
-    method: 'aliexpress.affiliate.productdetail.get',
-    timestamp: Date.now().toString(),
-    sign_method: 'sha256',
-    product_ids: productId.toString(),
-    tracking_id: 'default',
-    target_currency: 'USD',
-    target_language: 'EN'
-  };
-  const sortedKeys = Object.keys(params).sort();
-  let baseStr = '';
-  for (const key of sortedKeys) baseStr += key + params[key];
-  params.sign = crypto.createHmac('sha256', appSecret).update(baseStr).digest('hex').toUpperCase();
-
-  try {
-    const res = await got.post('https://api-sg.aliexpress.com/sync', {
-      form: params,
-      responseType: 'json',
-      timeout: { request: 12000 }
-    });
-    const p = res.body?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.product?.[0];
-    let parsed = '';
-    if (p) {
-      parsed = `\n\n✅ المستخرج:\n📦 المبيعات: ${p.lastest_volume}\n⭐ نسبة التقييم: ${p.evaluate_rate}\n🏪 المتجر: ${p.shop_id || '-'}`;
+  async function callDetail(country) {
+    const params = {
+      app_key: appKey,
+      method: 'aliexpress.affiliate.productdetail.get',
+      timestamp: Date.now().toString(),
+      sign_method: 'sha256',
+      product_ids: productId.toString(),
+      tracking_id: 'default',
+      target_currency: 'USD',
+      target_language: 'EN'
+    };
+    if (country) params.country = country;
+    const sortedKeys = Object.keys(params).sort();
+    let baseStr = '';
+    for (const key of sortedKeys) baseStr += key + params[key];
+    params.sign = crypto.createHmac('sha256', appSecret).update(baseStr).digest('hex').toUpperCase();
+    try {
+      const res = await got.post('https://api-sg.aliexpress.com/sync', {
+        form: params, responseType: 'json', timeout: { request: 12000 }
+      });
+      return res.body;
+    } catch (e) {
+      return { error: e.message, body: e.response?.body };
     }
-    await ctx.reply(`📡 productdetail.get:\n${JSON.stringify(res.body).substring(0, 1200)}${parsed}`);
-  } catch (e) {
-    await ctx.reply(`❌ ${e.message}: ${e.response?.body ? JSON.stringify(e.response.body).substring(0, 500) : ''}`);
   }
+
+  // Default call: dump the FULL raw response in chunks so we see every field
+  const full = await callDetail(null);
+  const fullStr = JSON.stringify(full);
+  for (let i = 0; i < fullStr.length && i < 8000; i += 3500) {
+    await ctx.reply(`📡 (افتراضي) جزء ${Math.floor(i / 3500) + 1}:\n${fullStr.substring(i, i + 3500)}`);
+  }
+
+  // Compare across countries to see which returns real volume/rating
+  let summary = '🔬 مقارنة الدول:\n';
+  for (const c of ['(افتراضي)', 'US', 'DZ', 'SA']) {
+    const country = c === '(افتراضي)' ? null : c;
+    const body = country ? await callDetail(country) : full;
+    const p = body?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.product?.[0];
+    summary += `\n${c}: ${p ? `مبيعات=${p.lastest_volume} تقييم=${p.evaluate_rate}` : 'لا بيانات'}`;
+  }
+  await ctx.reply(summary);
 });
 
 bot.on('text', async (ctx) => {

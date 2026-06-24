@@ -92,6 +92,60 @@ function buildAliSign(params, appSecret) {
     return crypto.createHmac('sha256', appSecret).update(baseStr).digest('hex').toUpperCase();
 }
 
+async function callAffiliateDetail(productId, appKey, appSecret, country) {
+    const params = {
+        app_key: appKey,
+        method: 'aliexpress.affiliate.productdetail.get',
+        timestamp: Date.now().toString(),
+        sign_method: 'sha256',
+        product_ids: productId.toString(),
+        tracking_id: 'default',
+        target_currency: 'USD',
+        target_language: 'EN'
+    };
+    if (country) params.country = country;
+    params.sign = buildAliSign(params, appSecret);
+
+    const res = await got.post('https://api-sg.aliexpress.com/sync', {
+        form: params,
+        responseType: 'json',
+        timeout: { request: 12000 }
+    });
+
+    return res.body?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.product?.[0] || null;
+}
+
+function parseAffiliateProduct(productData) {
+    if (!productData) return null;
+
+    // lastest_volume = recent sales count (hide zero — it's misleading, not real)
+    const volume = productData.lastest_volume ?? productData.volume ?? null;
+    let orders = null;
+    if (volume != null) {
+        const vStr = String(volume).trim();
+        const numeric = parseInt(vStr.replace(/[^\d]/g, ''), 10);
+        if (numeric > 0) {
+            orders = /^\d+$/.test(vStr) ? numeric.toLocaleString() : vStr;
+        }
+    }
+
+    // evaluate_rate = positive feedback rate, e.g. "92.3%"
+    const evaluateRate = productData.evaluate_rate
+        ? parseFloat(String(productData.evaluate_rate).replace('%', ''))
+        : null;
+    const hasRate = evaluateRate && evaluateRate > 0;
+    const rating = hasRate ? (evaluateRate / 20).toFixed(1) : null;
+    const storeFeedback = hasRate ? `${evaluateRate.toFixed(1)}%` : null;
+
+    return {
+        orders,
+        rating,
+        reviews: null,
+        storeFeedback,
+        storeName: productData.shop_name || null
+    };
+}
+
 async function fetchProductDetailsAPI(productId) {
     const appKey = process.env.ALI_APP_KEY;
     const appSecret = process.env.ALI_APP_SECRET;
@@ -101,57 +155,25 @@ async function fetchProductDetailsAPI(productId) {
     }
 
     try {
-        const params = {
-            app_key: appKey,
-            method: 'aliexpress.affiliate.productdetail.get',
-            timestamp: Date.now().toString(),
-            sign_method: 'sha256',
-            product_ids: productId.toString(),
-            tracking_id: 'default',
-            target_currency: 'USD',
-            target_language: 'EN'
-        };
-        params.sign = buildAliSign(params, appSecret);
+        // First attempt: default (no country)
+        let productData = await callAffiliateDetail(productId, appKey, appSecret, null);
+        let parsed = parseAffiliateProduct(productData);
 
-        const res = await got.post('https://api-sg.aliexpress.com/sync', {
-            form: params,
-            responseType: 'json',
-            timeout: { request: 12000 }
-        });
-
-        const body = res.body;
-        console.log('Affiliate productdetail response:', JSON.stringify(body).substring(0, 500));
-
-        const respResult = body?.aliexpress_affiliate_productdetail_get_response?.resp_result;
-        const productData = respResult?.result?.products?.product?.[0];
-
-        if (!productData) {
-            console.log('No product data in affiliate response');
-            return null;
+        // Choice / region-restricted products often return zeros on the default
+        // country. Retry with explicit countries to recover their real stats.
+        if (!parsed || (!parsed.orders && !parsed.rating)) {
+            for (const country of ['US', 'DZ']) {
+                const retryData = await callAffiliateDetail(productId, appKey, appSecret, country);
+                const retryParsed = parseAffiliateProduct(retryData);
+                if (retryParsed && (retryParsed.orders || retryParsed.rating)) {
+                    console.log(`Affiliate detail recovered with country=${country}`);
+                    return retryParsed;
+                }
+            }
         }
 
-        // lastest_volume = recent sales count
-        const volume = productData.lastest_volume ?? productData.volume ?? null;
-        let orders = null;
-        if (volume != null) {
-            const vStr = String(volume).trim();
-            orders = /^\d+$/.test(vStr) ? parseInt(vStr).toLocaleString() : vStr;
-        }
-
-        // evaluate_rate = positive feedback rate, e.g. "92.3%"
-        const evaluateRate = productData.evaluate_rate
-            ? parseFloat(String(productData.evaluate_rate).replace('%', ''))
-            : null;
-        const rating = evaluateRate ? (evaluateRate / 20).toFixed(1) : null;
-        const storeFeedback = evaluateRate ? `${evaluateRate.toFixed(1)}%` : null;
-
-        return {
-            orders,
-            rating,
-            reviews: null,
-            storeFeedback,
-            storeName: productData.shop_name || null
-        };
+        if (!parsed) console.log('No product data in affiliate response');
+        return parsed;
     } catch (err) {
         console.error('❌ Affiliate API error:', err.message);
         return null;
@@ -269,3 +291,5 @@ async function portaffFunction(cookie, ids) {
     return result;
 }
 exports.portaffFunction = portaffFunction;
+exports.idCatcher = idCatcher;
+exports.fetchProductDetailsAPI = fetchProductDetailsAPI;
