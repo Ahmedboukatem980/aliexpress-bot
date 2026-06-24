@@ -106,6 +106,33 @@ async function initDB() {
         converted_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS products_cache (
+        product_id TEXT PRIMARY KEY,
+        title TEXT,
+        image_url TEXT,
+        details JSONB,
+        links JSONB,
+        cached_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS saved_products (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        product_id TEXT,
+        title TEXT,
+        image_url TEXT,
+        details JSONB,
+        links JSONB,
+        saved_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, product_id)
+      );
+    `);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS title TEXT;`);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS image_url TEXT;`);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS details JSONB;`);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS links JSONB;`);
     await loadButtonSettings();
     await loadBotSettings();
     console.log('Database tables ready');
@@ -152,11 +179,58 @@ const mainKeyboard = (ctx) => {
   if (ctx.from.id === ADMIN_ID) {
     return Markup.keyboard([
       ['📢 إرسال رسالة', '👥 المشتركين', '📊 الإحصائيات'],
-      ['⚙️ إعدادات الأزرار']
+      ['⚙️ إعدادات الأزرار', '💾 منتجاتي المحفوظة']
     ]).resize();
   }
-  return Markup.removeKeyboard();
+  return Markup.keyboard([
+    ['💾 منتجاتي المحفوظة']
+  ]).resize();
 };
+
+const SAVED_LIMIT = 50;
+const SAVED_PAGE_SIZE = 8;
+
+function formatDetailsSection(d) {
+  if (!d) return '';
+  const ratingStars = d.rating ? '⭐'.repeat(Math.round(parseFloat(d.rating))) + ` ${d.rating}/5` : null;
+  const lines = [];
+  if (d.orders) lines.push(`📦 المبيعات: ${d.orders}`);
+  if (ratingStars) lines.push(`${ratingStars}${d.reviews ? ` (${d.reviews} تقييم)` : ''}`);
+  if (d.storeFeedback) lines.push(`🏪 ثقة المتجر: ${d.storeFeedback}${d.storeName ? ` — ${d.storeName}` : ''}`);
+  return lines.length > 0 ? '\n\n' + lines.join('\n') : '';
+}
+
+function buildProductCaption(title, details, links) {
+  const linksPart = `🛒 رابط تخفيض النقاط:\n${links.coin}\n\n🛒 رابط تخفيض النقاط القديم:\n${links.point}\n\n🛒 رابط السوبر ديلز:\n${links.super}\n\n🛒 رابط العرض المحدود:\n${links.limit}\n\n🛒 رابط عرض bundle:\n${links.ther3}`;
+  let head = `🛍️ اسم المنتج: ${title}${formatDetailsSection(details)}`;
+  const MAX = 1024;
+  const sep = '\n\n';
+  // Telegram photo captions cap at 1024 chars; keep links intact, trim the head if needed
+  if ((head + sep + linksPart).length > MAX) {
+    const room = MAX - sep.length - linksPart.length - 1;
+    head = head.substring(0, Math.max(0, room)) + '…';
+  }
+  return head + sep + linksPart;
+}
+
+function buildChannelButtons() {
+  const inlineButtons = [];
+  if (buttonSettings.btn1.text) {
+    const btn1Url = buttonSettings.btn1.url || Channel || 'https://t.me/channel';
+    inlineButtons.push([{ text: buttonSettings.btn1.text, url: btn1Url }]);
+  }
+  if (buttonSettings.btn2.text && buttonSettings.btn2.url) {
+    inlineButtons.push([{ text: buttonSettings.btn2.text, url: buttonSettings.btn2.url }]);
+  }
+  if (buttonSettings.btn3.text) {
+    if (buttonSettings.btn3.isCallback) {
+      inlineButtons.push([{ text: buttonSettings.btn3.text, callback_data: 'note_info' }]);
+    } else if (buttonSettings.btn3.url) {
+      inlineButtons.push([{ text: buttonSettings.btn3.text, url: buttonSettings.btn3.url }]);
+    }
+  }
+  return inlineButtons;
+}
 
 let buttonSettings = {
   btn1: { text: '🛍️ لمزيد من العروض اشترك في قناتنا من هنا', url: '' },
@@ -475,6 +549,126 @@ bot.command('testapi', async (ctx) => {
   await ctx.reply(summary);
 });
 
+async function sendSavedList(ctx, page, edit) {
+  const userId = ctx.from.id;
+  if (!pool || !dbConnected) return ctx.reply('قاعدة البيانات غير متوفرة حالياً.');
+  try {
+    const totalRes = await pool.query('SELECT COUNT(*) FROM saved_products WHERE user_id = $1', [userId]);
+    const total = parseInt(totalRes.rows[0].count, 10);
+    if (total === 0) {
+      const msg = '📭 لا توجد منتجات محفوظة بعد.\n\nأرسل رابط منتج ثم اضغط 💾 حفظ المنتج لإضافته هنا.';
+      if (edit) return ctx.editMessageText(msg).catch(() => ctx.reply(msg));
+      return ctx.reply(msg);
+    }
+    const totalPages = Math.ceil(total / SAVED_PAGE_SIZE);
+    page = Math.max(0, Math.min(page, totalPages - 1));
+    const offset = page * SAVED_PAGE_SIZE;
+    const res = await pool.query(
+      `SELECT id, COALESCE(title, 'منتج') AS title
+       FROM saved_products
+       WHERE user_id = $1 ORDER BY saved_at DESC LIMIT $2 OFFSET $3`,
+      [userId, SAVED_PAGE_SIZE, offset]
+    );
+    const keyboard = res.rows.map(r => {
+      let t = (r.title || 'منتج').replace(/\n/g, ' ').trim();
+      if (t.length > 50) t = t.substring(0, 47) + '...';
+      return [{ text: `🛍️ ${t}`, callback_data: `view:${r.id}` }];
+    });
+    const nav = [];
+    if (page > 0) nav.push({ text: '◀️ السابق', callback_data: `spage:${page - 1}` });
+    if (page < totalPages - 1) nav.push({ text: 'التالي ▶️', callback_data: `spage:${page + 1}` });
+    if (nav.length) keyboard.push(nav);
+    const header = `💾 منتجاتك المحفوظة (${total})\nصفحة ${page + 1}/${totalPages} — اختر منتجاً لعرضه:`;
+    const markup = { reply_markup: { inline_keyboard: keyboard } };
+    if (edit) return ctx.editMessageText(header, markup).catch(() => ctx.reply(header, markup));
+    return ctx.reply(header, markup);
+  } catch (e) {
+    console.log('sendSavedList error:', e.message);
+    return ctx.reply('حدث خطأ أثناء جلب المنتجات المحفوظة.');
+  }
+}
+
+bot.hears('💾 منتجاتي المحفوظة', (ctx) => sendSavedList(ctx, 0, false));
+
+bot.action(/^spage:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return sendSavedList(ctx, parseInt(ctx.match[1], 10), true);
+});
+
+bot.action(/^save:(.+)$/, async (ctx) => {
+  const userId = ctx.from.id;
+  const productId = ctx.match[1];
+  if (!pool || !dbConnected) return ctx.answerCbQuery('قاعدة البيانات غير متوفرة حالياً.', { show_alert: true });
+  try {
+    const cacheRes = await pool.query('SELECT 1 FROM products_cache WHERE product_id = $1', [productId]);
+    if (cacheRes.rowCount === 0) {
+      return ctx.answerCbQuery('انتهت صلاحية هذا المنتج، أعد إرسال الرابط ثم احفظه.', { show_alert: true });
+    }
+    // Snapshot the product into the user's list atomically (limit enforced in-query)
+    const ins = await pool.query(
+      `INSERT INTO saved_products (user_id, product_id, title, image_url, details, links)
+       SELECT $1, c.product_id, c.title, c.image_url, c.details, c.links
+       FROM products_cache c
+       WHERE c.product_id = $2
+         AND (SELECT COUNT(*) FROM saved_products WHERE user_id = $1) < $3
+       ON CONFLICT (user_id, product_id) DO NOTHING
+       RETURNING id`,
+      [userId, productId, SAVED_LIMIT]
+    );
+    if (ins.rowCount > 0) {
+      return ctx.answerCbQuery('✅ تم حفظ المنتج! افتح "💾 منتجاتي المحفوظة" لعرضه.', { show_alert: true });
+    }
+    const countRes = await pool.query('SELECT COUNT(*) FROM saved_products WHERE user_id = $1', [userId]);
+    if (parseInt(countRes.rows[0].count, 10) >= SAVED_LIMIT) {
+      return ctx.answerCbQuery(`وصلت الحد الأقصى (${SAVED_LIMIT} منتج). احذف بعض المنتجات أولاً.`, { show_alert: true });
+    }
+    return ctx.answerCbQuery('📌 هذا المنتج محفوظ مسبقاً في مفضلتك.', { show_alert: true });
+  } catch (e) {
+    console.log('save action error:', e.message);
+    return ctx.answerCbQuery('حدث خطأ أثناء الحفظ.', { show_alert: true });
+  }
+});
+
+bot.action(/^view:(\d+)$/, async (ctx) => {
+  const userId = ctx.from.id;
+  const savedId = parseInt(ctx.match[1], 10);
+  if (!pool || !dbConnected) return ctx.answerCbQuery();
+  try {
+    const res = await pool.query(
+      `SELECT id, title, image_url, details, links
+       FROM saved_products
+       WHERE id = $1 AND user_id = $2`,
+      [savedId, userId]
+    );
+    if (res.rowCount === 0 || !res.rows[0].links) {
+      return ctx.answerCbQuery('المنتج غير متوفر.', { show_alert: true });
+    }
+    const row = res.rows[0];
+    await ctx.answerCbQuery().catch(() => {});
+    const inlineButtons = buildChannelButtons();
+    inlineButtons.push([{ text: '🗑️ حذف من المحفوظات', callback_data: `del:${row.id}` }]);
+    const caption = buildProductCaption(row.title || 'منتج', row.details, row.links);
+    await ctx.replyWithPhoto({ url: row.image_url }, { caption, reply_markup: { inline_keyboard: inlineButtons } });
+  } catch (e) {
+    console.log('view action error:', e.message);
+    return ctx.answerCbQuery('حدث خطأ.', { show_alert: true });
+  }
+});
+
+bot.action(/^del:(\d+)$/, async (ctx) => {
+  const userId = ctx.from.id;
+  const savedId = parseInt(ctx.match[1], 10);
+  if (!pool || !dbConnected) return ctx.answerCbQuery();
+  try {
+    const del = await pool.query('DELETE FROM saved_products WHERE id = $1 AND user_id = $2', [savedId, userId]);
+    await ctx.answerCbQuery(del.rowCount > 0 ? '🗑️ تم حذف المنتج من المحفوظات.' : 'غير موجود.', { show_alert: true });
+    if (del.rowCount > 0) ctx.deleteMessage().catch(() => {});
+  } catch (e) {
+    console.log('del action error:', e.message);
+    return ctx.answerCbQuery('حدث خطأ.', { show_alert: true });
+  }
+});
+
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
@@ -555,41 +749,38 @@ bot.on('text', async (ctx) => {
       return ctx.reply('🚨 البوت يدعم فقط روابط منتجات AliExpress');
     }
     // Build dynamic inline keyboard from buttonSettings
-    const inlineButtons = [];
-    if (buttonSettings.btn1.text) {
-      const btn1Url = buttonSettings.btn1.url || Channel || 'https://t.me/channel';
-      inlineButtons.push([{ text: buttonSettings.btn1.text, url: btn1Url }]);
-    }
-    if (buttonSettings.btn2.text && buttonSettings.btn2.url) {
-      inlineButtons.push([{ text: buttonSettings.btn2.text, url: buttonSettings.btn2.url }]);
-    }
-    if (buttonSettings.btn3.text) {
-      if (buttonSettings.btn3.isCallback) {
-        inlineButtons.push([{ text: buttonSettings.btn3.text, callback_data: 'note_info' }]);
-      } else if (buttonSettings.btn3.url) {
-        inlineButtons.push([{ text: buttonSettings.btn3.text, url: buttonSettings.btn3.url }]);
-      }
+    const inlineButtons = buildChannelButtons();
+
+    const productId = coinPi.productId;
+    if (productId) {
+      inlineButtons.push([{ text: '💾 حفظ المنتج', callback_data: `save:${productId}` }]);
     }
 
-    const d = coinPi.details;
-    let detailsSection = '';
-    if (d) {
-      const ratingStars = d.rating ? '⭐'.repeat(Math.round(parseFloat(d.rating))) + ` ${d.rating}/5` : null;
-      const lines = [];
-      if (d.orders) lines.push(`📦 المبيعات: ${d.orders}`);
-      if (ratingStars) lines.push(`${ratingStars}${d.reviews ? ` (${d.reviews} تقييم)` : ''}`);
-      if (d.storeFeedback) lines.push(`🏪 ثقة المتجر: ${d.storeFeedback}${d.storeName ? ` — ${d.storeName}` : ''}`);
-      if (lines.length > 0) detailsSection = '\n\n' + lines.join('\n');
-    }
+    const caption = buildProductCaption(coinPi.previews.title, coinPi.details, coinPi.aff);
 
     await ctx.replyWithPhoto(
       { url: coinPi.previews.image_url },
       {
-        caption: `🛍️ اسم المنتج: ${coinPi.previews.title}${detailsSection}\n\n🛒 رابط تخفيض النقاط:\n${coinPi.aff.coin}\n\n🛒 رابط تخفيض النقاط القديم:\n${coinPi.aff.point}\n\n🛒 رابط السوبر ديلز:\n${coinPi.aff.super}\n\n🛒 رابط العرض المحدود:\n${coinPi.aff.limit}\n\n🛒 رابط عرض bundle:\n${coinPi.aff.ther3}`,
+        caption,
         reply_markup: { inline_keyboard: inlineButtons }
       }
     ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });
-    
+
+    // Cache product so it can be saved later (callback only carries the id)
+    if (pool && dbConnected && productId) {
+      try {
+        await pool.query(
+          `INSERT INTO products_cache (product_id, title, image_url, details, links)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (product_id) DO UPDATE SET
+             title = EXCLUDED.title, image_url = EXCLUDED.image_url,
+             details = EXCLUDED.details, links = EXCLUDED.links, cached_at = NOW()`,
+          [productId, coinPi.previews.title, coinPi.previews.image_url,
+           JSON.stringify(coinPi.details || {}), JSON.stringify(coinPi.aff || {})]
+        );
+      } catch (e) { console.log('products_cache error:', e.message); }
+    }
+
     // Track converted link
     if (pool && dbConnected) {
       try {

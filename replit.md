@@ -10,6 +10,11 @@ A Telegram bot that generates AliExpress affiliate links with discounts. Users s
   - Broadcast messages to all subscribers
   - View subscriber statistics (daily, weekly, monthly)
   - View subscriber list
+- **Saved Products (Wishlist)** (New): Each user has a personal favorites list:
+  - "💾 حفظ المنتج" button under every product result saves it to the user's list
+  - "💾 منتجاتي المحفوظة" keyboard button opens a paginated list of saved products
+  - Each saved item can be viewed (photo + stats + discount links) or deleted
+  - Saved as an immutable snapshot (links/stats stay as they were when saved); 50-item limit per user
 - **PostgreSQL Database**: Tracks all users for statistics and broadcast functionality
 
 ## Environment Variables (Secrets)

@@ -1,1 +1,2 @@
 - [AliExpress Affiliate API](aliexpress-affiliate-api.md) — api-sg gateway signing, correct method names, and what this app's affiliate-scoped keys can/can't do.
+- [Saved products](saved-products-feature.md) — wishlist items must store a self-contained snapshot, not a thin ref to the shared mutable product cache.

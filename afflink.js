@@ -287,6 +287,7 @@ async function portaffFunction(cookie, ids) {
 
     result.previews = preview;
     result.details = details;
+    result.productId = productId;
 
     return result;
 }
