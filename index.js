@@ -412,52 +412,55 @@ bot.action('note_info', async (ctx) => {
 
 bot.command('testapi', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
+  const crypto = require('crypto');
+  const got = require('got');
   const args = ctx.message.text.split(' ');
   const productId = args[1] || '1005006104050503';
   await ctx.reply(`🔍 اختبار API للمنتج: ${productId}...`);
 
   const appKey = process.env.ALI_APP_KEY;
   const appSecret = process.env.ALI_APP_SECRET;
-  const hasCook = !!cookies;
 
-  let report = `🔑 ALI_APP_KEY: ${appKey ? '✅ موجود' : '❌ غير موجود'}\n`;
-  report += `🔑 ALI_APP_SECRET: ${appSecret ? '✅ موجود' : '❌ غير موجود'}\n`;
-  report += `🍪 Cook: ${hasCook ? '✅ موجود' : '❌ غير موجود'}\n\n`;
+  if (!appKey || !appSecret) {
+    return ctx.reply(`❌ المفاتيح ناقصة\nALI_APP_KEY: ${appKey ? '✅' : '❌'}\nALI_APP_SECRET: ${appSecret ? '✅' : '❌'}`);
+  }
 
-  if (appKey && appSecret) {
+  // IOP-style call: HMAC-SHA256 over sorted key+value, ms timestamp
+  async function callAli(method, businessParams) {
+    const params = {
+      app_key: appKey,
+      method,
+      timestamp: Date.now().toString(),
+      sign_method: 'sha256',
+      ...businessParams
+    };
+    const sortedKeys = Object.keys(params).sort();
+    let baseStr = '';
+    for (const key of sortedKeys) baseStr += key + params[key];
+    params.sign = crypto.createHmac('sha256', appSecret).update(baseStr).digest('hex').toUpperCase();
+
     try {
-      const crypto = require('crypto');
-      const got = require('got');
-      const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
-      const params = {
-        app_key: appKey,
-        method: 'aliexpress.affiliate.product.detail.get',
-        timestamp: ts,
-        format: 'json',
-        v: '2.0',
-        sign_method: 'hmac-sha256',
-        product_id: productId.toString(),
-        tracking_id: 'default'
-      };
-      const sortedKeys = Object.keys(params).sort();
-      let signStr = appSecret;
-      for (const key of sortedKeys) signStr += key + params[key];
-      signStr += appSecret;
-      params.sign = crypto.createHmac('sha256', appSecret).update(signStr).digest('hex').toUpperCase();
-
       const res = await got.post('https://api-sg.aliexpress.com/sync', {
         form: params,
         responseType: 'json',
-        timeout: { request: 10000 }
+        timeout: { request: 12000 }
       });
-
-      report += `📡 API Response:\n${JSON.stringify(res.body).substring(0, 800)}`;
+      return JSON.stringify(res.body);
     } catch (e) {
-      report += `❌ API Error: ${e.message}`;
+      return `ERR ${e.message}: ${e.response?.body ? JSON.stringify(e.response.body) : ''}`;
     }
   }
 
-  await ctx.reply(report.substring(0, 4000));
+  const tests = [
+    ['affiliate.product.detail.get', 'aliexpress.affiliate.product.detail.get', { product_ids: productId.toString(), tracking_id: 'default', target_currency: 'USD', target_language: 'EN' }],
+    ['affiliate.link.generate', 'aliexpress.affiliate.link.generate', { promotion_link_type: '0', source_values: `https://www.aliexpress.com/item/${productId}.html`, tracking_id: 'default' }],
+    ['ds.product.get', 'aliexpress.ds.product.get', { product_id: productId.toString(), ship_to_country: 'US', target_currency: 'USD', target_language: 'EN' }]
+  ];
+
+  for (const [label, method, bp] of tests) {
+    const result = await callAli(method, bp);
+    await ctx.reply(`📡 ${label}:\n${result.substring(0, 1500)}`);
+  }
 });
 
 bot.on('text', async (ctx) => {
