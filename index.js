@@ -425,41 +425,35 @@ bot.command('testapi', async (ctx) => {
     return ctx.reply(`❌ المفاتيح ناقصة\nALI_APP_KEY: ${appKey ? '✅' : '❌'}\nALI_APP_SECRET: ${appSecret ? '✅' : '❌'}`);
   }
 
-  // IOP-style call: HMAC-SHA256 over sorted key+value, ms timestamp
-  async function callAli(method, businessParams) {
-    const params = {
-      app_key: appKey,
-      method,
-      timestamp: Date.now().toString(),
-      sign_method: 'sha256',
-      ...businessParams
-    };
-    const sortedKeys = Object.keys(params).sort();
-    let baseStr = '';
-    for (const key of sortedKeys) baseStr += key + params[key];
-    params.sign = crypto.createHmac('sha256', appSecret).update(baseStr).digest('hex').toUpperCase();
+  const params = {
+    app_key: appKey,
+    method: 'aliexpress.affiliate.productdetail.get',
+    timestamp: Date.now().toString(),
+    sign_method: 'sha256',
+    product_ids: productId.toString(),
+    tracking_id: 'default',
+    target_currency: 'USD',
+    target_language: 'EN'
+  };
+  const sortedKeys = Object.keys(params).sort();
+  let baseStr = '';
+  for (const key of sortedKeys) baseStr += key + params[key];
+  params.sign = crypto.createHmac('sha256', appSecret).update(baseStr).digest('hex').toUpperCase();
 
-    try {
-      const res = await got.post('https://api-sg.aliexpress.com/sync', {
-        form: params,
-        responseType: 'json',
-        timeout: { request: 12000 }
-      });
-      return JSON.stringify(res.body);
-    } catch (e) {
-      return `ERR ${e.message}: ${e.response?.body ? JSON.stringify(e.response.body) : ''}`;
+  try {
+    const res = await got.post('https://api-sg.aliexpress.com/sync', {
+      form: params,
+      responseType: 'json',
+      timeout: { request: 12000 }
+    });
+    const p = res.body?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.product?.[0];
+    let parsed = '';
+    if (p) {
+      parsed = `\n\n✅ المستخرج:\n📦 المبيعات: ${p.lastest_volume}\n⭐ نسبة التقييم: ${p.evaluate_rate}\n🏪 المتجر: ${p.shop_id || '-'}`;
     }
-  }
-
-  const tests = [
-    ['affiliate.product.detail.get', 'aliexpress.affiliate.product.detail.get', { product_ids: productId.toString(), tracking_id: 'default', target_currency: 'USD', target_language: 'EN' }],
-    ['affiliate.link.generate', 'aliexpress.affiliate.link.generate', { promotion_link_type: '0', source_values: `https://www.aliexpress.com/item/${productId}.html`, tracking_id: 'default' }],
-    ['ds.product.get', 'aliexpress.ds.product.get', { product_id: productId.toString(), ship_to_country: 'US', target_currency: 'USD', target_language: 'EN' }]
-  ];
-
-  for (const [label, method, bp] of tests) {
-    const result = await callAli(method, bp);
-    await ctx.reply(`📡 ${label}:\n${result.substring(0, 1500)}`);
+    await ctx.reply(`📡 productdetail.get:\n${JSON.stringify(res.body).substring(0, 1200)}${parsed}`);
+  } catch (e) {
+    await ctx.reply(`❌ ${e.message}: ${e.response?.body ? JSON.stringify(e.response.body).substring(0, 500) : ''}`);
   }
 });
 
@@ -574,7 +568,6 @@ bot.on('text', async (ctx) => {
       { url: coinPi.previews.image_url },
       {
         caption: `🛍️ اسم المنتج: ${coinPi.previews.title}${detailsSection}\n\n🛒 رابط تخفيض النقاط:\n${coinPi.aff.coin}\n\n🛒 رابط تخفيض النقاط القديم:\n${coinPi.aff.point}\n\n🛒 رابط السوبر ديلز:\n${coinPi.aff.super}\n\n🛒 رابط العرض المحدود:\n${coinPi.aff.limit}\n\n🛒 رابط عرض bundle:\n${coinPi.aff.ther3}`,
-        parse_mode: 'HTML',
         reply_markup: { inline_keyboard: inlineButtons }
       }
     ).then(() => { if (sent) ctx.deleteMessage(sent.message_id).catch(() => {}); });

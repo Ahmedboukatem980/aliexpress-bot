@@ -85,11 +85,11 @@ async function fetchLinkPreview(productId) {
 }
 
 function buildAliSign(params, appSecret) {
+    // AliExpress IOP signing: HMAC-SHA256 over sorted key+value (no secret wrapping)
     const sortedKeys = Object.keys(params).sort();
-    let signStr = appSecret;
-    for (const key of sortedKeys) signStr += key + params[key];
-    signStr += appSecret;
-    return crypto.createHmac('sha256', appSecret).update(signStr).digest('hex').toUpperCase();
+    let baseStr = '';
+    for (const key of sortedKeys) baseStr += key + params[key];
+    return crypto.createHmac('sha256', appSecret).update(baseStr).digest('hex').toUpperCase();
 }
 
 async function fetchProductDetailsAPI(productId) {
@@ -100,100 +100,57 @@ async function fetchProductDetailsAPI(productId) {
         return null;
     }
 
-    // Try DS API first
     try {
-        const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
         const params = {
             app_key: appKey,
-            method: 'aliexpress.ds.product.get',
-            timestamp: ts,
-            format: 'json',
-            v: '2.0',
-            sign_method: 'hmac-sha256',
-            product_id: productId.toString(),
-            local_country: 'DZ',
-            local_language: 'en'
+            method: 'aliexpress.affiliate.productdetail.get',
+            timestamp: Date.now().toString(),
+            sign_method: 'sha256',
+            product_ids: productId.toString(),
+            tracking_id: 'default',
+            target_currency: 'USD',
+            target_language: 'EN'
         };
         params.sign = buildAliSign(params, appSecret);
 
         const res = await got.post('https://api-sg.aliexpress.com/sync', {
             form: params,
             responseType: 'json',
-            timeout: { request: 10000 }
+            timeout: { request: 12000 }
         });
 
-        const dsBody = res.body;
-        console.log('DS API response:', JSON.stringify(dsBody).substring(0, 400));
-        const dsResult = dsBody?.aliexpress_ds_product_get_response?.result;
+        const body = res.body;
+        console.log('Affiliate productdetail response:', JSON.stringify(body).substring(0, 500));
 
-        if (dsResult) {
-            const tradeStr = dsResult.product_sale_info?.trade_count
-                || dsResult.trade_count
-                || dsResult.lastest_volume;
-            const orders = tradeStr ? parseInt(tradeStr).toLocaleString() : null;
-            const rating = dsResult.average_star
-                || dsResult.averageStar
-                || dsResult.ae_item_properties?.averageStar
-                || null;
-            const reviews = dsResult.evaluate_info?.total_valid_num
-                ? parseInt(dsResult.evaluate_info.total_valid_num).toLocaleString()
-                : null;
-            const storeName = dsResult.store_info?.store_name || dsResult.store_name || null;
+        const respResult = body?.aliexpress_affiliate_productdetail_get_response?.resp_result;
+        const productData = respResult?.result?.products?.product?.[0];
 
-            if (orders || rating) {
-                return { orders, rating, reviews, storeFeedback: null, storeName };
-            }
+        if (!productData) {
+            console.log('No product data in affiliate response');
+            return null;
         }
-    } catch (err) {
-        console.error('❌ DS API error:', err.message);
-    }
 
-    // Try Affiliate API as fallback
-    try {
-        const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
-        const params = {
-            app_key: appKey,
-            method: 'aliexpress.affiliate.product.detail.get',
-            timestamp: ts,
-            format: 'json',
-            v: '2.0',
-            sign_method: 'hmac-sha256',
-            product_id: productId.toString(),
-            tracking_id: 'default'
-        };
-        params.sign = buildAliSign(params, appSecret);
+        // lastest_volume = recent sales count
+        const volume = productData.lastest_volume ?? productData.volume ?? null;
+        let orders = null;
+        if (volume != null) {
+            const vStr = String(volume).trim();
+            orders = /^\d+$/.test(vStr) ? parseInt(vStr).toLocaleString() : vStr;
+        }
 
-        const res = await got.post('https://api-sg.aliexpress.com/sync', {
-            form: params,
-            responseType: 'json',
-            timeout: { request: 10000 }
-        });
-
-        const affBody = res.body;
-        console.log('Affiliate API response:', JSON.stringify(affBody).substring(0, 400));
-
-        // Handle different response structures
-        const respResult = affBody?.aliexpress_affiliate_product_detail_get_response?.resp_result;
-        const productData = respResult?.result?.products?.product?.[0]
-            || respResult?.result?.product_list?.product?.[0]
-            || respResult?.result;
-
-        if (!productData) return null;
-
+        // evaluate_rate = positive feedback rate, e.g. "92.3%"
         const evaluateRate = productData.evaluate_rate
-            ? parseFloat(productData.evaluate_rate)
+            ? parseFloat(String(productData.evaluate_rate).replace('%', ''))
             : null;
-        const volume = productData.volume ?? productData.sales_volume ?? null;
-        const orders = volume != null ? parseInt(volume).toLocaleString() : null;
-        const starRating = productData.star_rating
-            || (evaluateRate ? (evaluateRate / 20).toFixed(1) : null);
+        const rating = evaluateRate ? (evaluateRate / 20).toFixed(1) : null;
+        const storeFeedback = evaluateRate ? `${evaluateRate.toFixed(1)}%` : null;
 
         return {
             orders,
-            rating: starRating,
+            rating,
             reviews: null,
-            storeFeedback: evaluateRate ? `${evaluateRate.toFixed(1)}%` : null,
-            storeName: productData.shop_name || productData.store_name || null
+            storeFeedback,
+            storeName: productData.shop_name || null
         };
     } catch (err) {
         console.error('❌ Affiliate API error:', err.message);

@@ -1,0 +1,1 @@
+- [AliExpress Affiliate API](aliexpress-affiliate-api.md) — api-sg gateway signing, correct method names, and what this app's affiliate-scoped keys can/can't do.
