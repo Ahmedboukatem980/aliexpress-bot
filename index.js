@@ -1,7 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const express = require('express');
 const app = express();
-const { portaffFunction, idCatcher } = require('./afflink');
+const { portaffFunction, idCatcher, fetchProductPrice } = require('./afflink');
 const { Pool } = require('pg');
 const cron = require('node-cron');
 const fs = require('fs');
@@ -113,6 +113,8 @@ async function initDB() {
         image_url TEXT,
         details JSONB,
         links JSONB,
+        price NUMERIC,
+        currency TEXT,
         cached_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -125,6 +127,11 @@ async function initDB() {
         image_url TEXT,
         details JSONB,
         links JSONB,
+        base_price NUMERIC,
+        currency TEXT,
+        last_price NUMERIC,
+        last_notified_price NUMERIC,
+        price_check_at TIMESTAMPTZ,
         saved_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(user_id, product_id)
       );
@@ -133,6 +140,13 @@ async function initDB() {
     await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS image_url TEXT;`);
     await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS details JSONB;`);
     await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS links JSONB;`);
+    await pool.query(`ALTER TABLE products_cache ADD COLUMN IF NOT EXISTS price NUMERIC;`);
+    await pool.query(`ALTER TABLE products_cache ADD COLUMN IF NOT EXISTS currency TEXT;`);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS base_price NUMERIC;`);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS currency TEXT;`);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS last_price NUMERIC;`);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS last_notified_price NUMERIC;`);
+    await pool.query(`ALTER TABLE saved_products ADD COLUMN IF NOT EXISTS price_check_at TIMESTAMPTZ;`);
     await loadButtonSettings();
     await loadBotSettings();
     console.log('Database tables ready');
@@ -189,11 +203,23 @@ const mainKeyboard = (ctx) => {
 
 const SAVED_LIMIT = 50;
 const SAVED_PAGE_SIZE = 8;
+const PRICE_CHECK_BATCH = 150;
+const PRICE_CHECK_DELAY = 400;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function formatPrice(price, currency) {
+  const p = Number(price);
+  if (!isFinite(p) || p <= 0) return null;
+  const cur = currency || 'USD';
+  return cur === 'USD' ? `$${p.toFixed(2)}` : `${p.toFixed(2)} ${cur}`;
+}
 
 function formatDetailsSection(d) {
   if (!d) return '';
   const ratingStars = d.rating ? '⭐'.repeat(Math.round(parseFloat(d.rating))) + ` ${d.rating}/5` : null;
+  const priceStr = formatPrice(d.price, d.currency);
   const lines = [];
+  if (priceStr) lines.push(`💰 السعر: ${priceStr}`);
   if (d.orders) lines.push(`📦 المبيعات: ${d.orders}`);
   if (ratingStars) lines.push(`${ratingStars}${d.reviews ? ` (${d.reviews} تقييم)` : ''}`);
   if (d.storeFeedback) lines.push(`🏪 ثقة المتجر: ${d.storeFeedback}${d.storeName ? ` — ${d.storeName}` : ''}`);
@@ -544,7 +570,7 @@ bot.command('testapi', async (ctx) => {
     const country = c === '(افتراضي)' ? null : c;
     const body = country ? await callDetail(country) : full;
     const p = body?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.product?.[0];
-    summary += `\n${c}: ${p ? `مبيعات=${p.lastest_volume} تقييم=${p.evaluate_rate}` : 'لا بيانات'}`;
+    summary += `\n${c}: ${p ? `سعر=${p.target_sale_price ?? p.sale_price ?? '—'} مبيعات=${p.lastest_volume} تقييم=${p.evaluate_rate}` : 'لا بيانات'}`;
   }
   await ctx.reply(summary);
 });
@@ -606,8 +632,8 @@ bot.action(/^save:(.+)$/, async (ctx) => {
     }
     // Snapshot the product into the user's list atomically (limit enforced in-query)
     const ins = await pool.query(
-      `INSERT INTO saved_products (user_id, product_id, title, image_url, details, links)
-       SELECT $1, c.product_id, c.title, c.image_url, c.details, c.links
+      `INSERT INTO saved_products (user_id, product_id, title, image_url, details, links, base_price, currency, last_price)
+       SELECT $1, c.product_id, c.title, c.image_url, c.details, c.links, c.price, c.currency, c.price
        FROM products_cache c
        WHERE c.product_id = $2
          AND (SELECT COUNT(*) FROM saved_products WHERE user_id = $1) < $3
@@ -770,13 +796,15 @@ bot.on('text', async (ctx) => {
     if (pool && dbConnected && productId) {
       try {
         await pool.query(
-          `INSERT INTO products_cache (product_id, title, image_url, details, links)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO products_cache (product_id, title, image_url, details, links, price, currency)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            ON CONFLICT (product_id) DO UPDATE SET
              title = EXCLUDED.title, image_url = EXCLUDED.image_url,
-             details = EXCLUDED.details, links = EXCLUDED.links, cached_at = NOW()`,
+             details = EXCLUDED.details, links = EXCLUDED.links,
+             price = EXCLUDED.price, currency = EXCLUDED.currency, cached_at = NOW()`,
           [productId, coinPi.previews.title, coinPi.previews.image_url,
-           JSON.stringify(coinPi.details || {}), JSON.stringify(coinPi.aff || {})]
+           JSON.stringify(coinPi.details || {}), JSON.stringify(coinPi.aff || {}),
+           coinPi.details?.price ?? null, coinPi.details?.currency ?? null]
         );
       } catch (e) { console.log('products_cache error:', e.message); }
     }
@@ -804,6 +832,77 @@ cron.schedule('0 18 * * *', async () => {
       } catch (e) {}
     }
   } catch (e) {}
+}, { timezone: "Africa/Algiers" });
+
+// Price-drop alerts: every 6h, re-check saved products and notify each user once
+// per NEW low below the price they saw when they saved it. Single in-process lock
+// prevents overlapping runs; distinct products are checked fairly (oldest first).
+let priceAlertRunning = false;
+cron.schedule('0 */6 * * *', async () => {
+  if (!pool || !dbConnected) return;
+  if (priceAlertRunning) return;
+  priceAlertRunning = true;
+  try {
+    const prods = await pool.query(
+      `SELECT product_id
+       FROM saved_products
+       WHERE base_price IS NOT NULL AND base_price > 0
+       GROUP BY product_id
+       ORDER BY MIN(price_check_at) ASC NULLS FIRST
+       LIMIT $1`,
+      [PRICE_CHECK_BATCH]
+    );
+    for (const { product_id } of prods.rows) {
+      let priceInfo = null;
+      try { priceInfo = await fetchProductPrice(product_id); } catch (e) {}
+      if (!priceInfo || !(priceInfo.price > 0)) {
+        // No valid price — advance rotation, never overwrite baselines with null/zero
+        await pool.query('UPDATE saved_products SET price_check_at = NOW() WHERE product_id = $1', [product_id]).catch(() => {});
+        await sleep(PRICE_CHECK_DELAY);
+        continue;
+      }
+      const current = priceInfo.price;
+      try {
+        // 1) Rows hitting a NEW low below baseline -> record the level + collect for alert
+        const alertRows = await pool.query(
+          `UPDATE saved_products
+           SET last_price = $2, price_check_at = NOW(), last_notified_price = $2
+           WHERE product_id = $1
+             AND base_price IS NOT NULL
+             AND $2 < base_price
+             AND (last_notified_price IS NULL OR $2 < last_notified_price)
+           RETURNING user_id, title, base_price, currency, links`,
+          [product_id, current]
+        );
+        // 2) Everyone else: record latest price; clear notified flag if price recovered
+        await pool.query(
+          `UPDATE saved_products
+           SET last_price = $2,
+               price_check_at = NOW(),
+               last_notified_price = CASE
+                 WHEN last_notified_price IS NOT NULL AND base_price IS NOT NULL AND $2 >= base_price THEN NULL
+                 ELSE last_notified_price END
+           WHERE product_id = $1`,
+          [product_id, current]
+        );
+        for (const r of alertRows.rows) {
+          const oldP = Number(r.base_price);
+          const pct = oldP > 0 ? Math.round((1 - current / oldP) * 100) : 0;
+          const coin = (r.links && r.links.coin) ? r.links.coin : '';
+          const msg = `🔔 انخفض سعر منتج محفوظ لديك!\n\n🛍️ ${r.title || 'منتج'}\n\n💰 السعر السابق: ${formatPrice(oldP, r.currency)}\n🔥 السعر الآن: ${formatPrice(current, r.currency)} (انخفاض ${pct}%)\n\n🛒 رابط الشراء:\n${coin}`;
+          try { await bot.telegram.sendMessage(r.user_id, msg); } catch (e) {}
+          await sleep(150);
+        }
+      } catch (e) {
+        console.log('price alert update error:', e.message);
+      }
+      await sleep(PRICE_CHECK_DELAY);
+    }
+  } catch (e) {
+    console.log('price alert cron error:', e.message);
+  } finally {
+    priceAlertRunning = false;
+  }
 }, { timezone: "Africa/Algiers" });
 
 bot.catch((err, ctx) => { console.error('Bot error:', err.message); });

@@ -115,6 +115,22 @@ async function callAffiliateDetail(productId, appKey, appSecret, country) {
     return res.body?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.product?.[0] || null;
 }
 
+function parsePrice(productData) {
+    if (!productData) return null;
+    const raw = productData.target_sale_price
+        ?? productData.target_app_sale_price
+        ?? productData.sale_price
+        ?? productData.app_sale_price
+        ?? null;
+    if (raw == null) return null;
+    const num = parseFloat(String(raw).replace(/[^\d.]/g, ''));
+    if (!isFinite(num) || num <= 0) return null;
+    const currency = productData.target_sale_price_currency
+        || productData.sale_price_currency
+        || 'USD';
+    return { price: num, currency };
+}
+
 function parseAffiliateProduct(productData) {
     if (!productData) return null;
 
@@ -137,12 +153,16 @@ function parseAffiliateProduct(productData) {
     const rating = hasRate ? (evaluateRate / 20).toFixed(1) : null;
     const storeFeedback = hasRate ? `${evaluateRate.toFixed(1)}%` : null;
 
+    const priceInfo = parsePrice(productData);
+
     return {
         orders,
         rating,
         reviews: null,
         storeFeedback,
-        storeName: productData.shop_name || null
+        storeName: productData.shop_name || null,
+        price: priceInfo ? priceInfo.price : null,
+        currency: priceInfo ? priceInfo.currency : null
     };
 }
 
@@ -178,6 +198,26 @@ async function fetchProductDetailsAPI(productId) {
         console.error('❌ Affiliate API error:', err.message);
         return null;
     }
+}
+
+// Lightweight price-only fetch for the price-drop cron. Tries default then
+// country fallbacks and returns the first VALID price (Choice products often
+// return zeros for stats but still expose a usable price on a retry).
+async function fetchProductPrice(productId) {
+    const appKey = process.env.ALI_APP_KEY;
+    const appSecret = process.env.ALI_APP_SECRET;
+    if (!appKey || !appSecret) return null;
+    // Catch per attempt so one failed/timed-out country doesn't skip the rest.
+    for (const country of [null, 'US', 'DZ']) {
+        try {
+            const data = await callAffiliateDetail(productId, appKey, appSecret, country);
+            const priceInfo = parsePrice(data);
+            if (priceInfo) return priceInfo;
+        } catch (err) {
+            console.error(`❌ fetchProductPrice (${country || 'default'}) error:`, err.message);
+        }
+    }
+    return null;
 }
 
 async function fetchProductDetailsWithCookie(productId, cookie) {
@@ -222,9 +262,18 @@ async function fetchProductDetailsWithCookie(productId, cookie) {
 async function fetchProductDetails(productId, cookie) {
     // Try official API first (if keys available)
     const apiResult = await fetchProductDetailsAPI(productId);
+    // API has real stats -> use it (it also carries price)
     if (apiResult && (apiResult.orders || apiResult.rating)) return apiResult;
-    // Fallback: scrape with cookie authentication
-    return fetchProductDetailsWithCookie(productId, cookie);
+    // API lacked stats (e.g. Choice products) — scrape cookie for stats, but NEVER
+    // throw away an API price: the scrape has no price, and losing it means the
+    // saved product gets no base_price and is never monitored for drops.
+    const cookieResult = await fetchProductDetailsWithCookie(productId, cookie);
+    if (!cookieResult) return apiResult; // may be price-only, still useful
+    if (apiResult && apiResult.price != null && cookieResult.price == null) {
+        cookieResult.price = apiResult.price;
+        cookieResult.currency = apiResult.currency;
+    }
+    return cookieResult;
 }
 
 async function portaffFunction(cookie, ids) {
@@ -294,3 +343,4 @@ async function portaffFunction(cookie, ids) {
 exports.portaffFunction = portaffFunction;
 exports.idCatcher = idCatcher;
 exports.fetchProductDetailsAPI = fetchProductDetailsAPI;
+exports.fetchProductPrice = fetchProductPrice;
